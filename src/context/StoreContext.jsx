@@ -86,13 +86,13 @@ const generateSalesForStore = (cfg) => {
   const t2 = curH > 10 ? `${String(Math.max(8, curH - 2)).padStart(2, '0')}:10` : '08:25';
   const t3 = curH > 11 ? `${String(Math.max(8, curH - 3)).padStart(2, '0')}:30` : '08:10';
 
-  const p1 = cfg.sampleProducts?.[0] || { name: 'Mahsulot 1', price: 25000, unit: 'dona' };
-  const p2 = cfg.sampleProducts?.[1] || { name: 'Mahsulot 2', price: 45000, unit: 'dona' };
-  const p3 = cfg.sampleProducts?.[2] || { name: 'Mahsulot 3', price: 12000, unit: 'dona' };
+  const p1 = cfg.sampleProducts?.[0] || { id: 'p1', name: 'Mahsulot 1', price: 25000, costPrice: 18000, unit: 'dona' };
+  const p2 = cfg.sampleProducts?.[1] || { id: 'p2', name: 'Mahsulot 2', price: 45000, costPrice: 32000, unit: 'dona' };
+  const p3 = cfg.sampleProducts?.[2] || { id: 'p3', name: 'Mahsulot 3', price: 12000, costPrice: 9000, unit: 'dona' };
   return [
-    { id: 's1', time: t1, date: today, product: p1.name, qty: 2, unit: p1.unit || 'dona', price: p1.price, total: p1.price * 2, seller: 'Ali Valiyev', paymentType: 'Naqd' },
-    { id: 's2', time: t2, date: today, product: p2.name, qty: 1, unit: p2.unit || 'dona', price: p2.price, total: p2.price, seller: 'Sardor Rahimov', paymentType: 'Karta' },
-    { id: 's3', time: t3, date: today, product: p3.name, qty: 3, unit: p3.unit || 'dona', price: p3.price, total: p3.price * 3, seller: 'Azizbek', paymentType: 'Naqd' },
+    { id: 's1', productId: p1.id, time: t1, date: today, product: p1.name, qty: 2, unit: p1.unit || 'dona', price: p1.price, costPrice: p1.costPrice, total: p1.price * 2, seller: 'Ali Valiyev', paymentType: 'Naqd' },
+    { id: 's2', productId: p2.id, time: t2, date: today, product: p2.name, qty: 1, unit: p2.unit || 'dona', price: p2.price, costPrice: p2.costPrice, total: p2.price, seller: 'Sardor Rahimov', paymentType: 'Karta' },
+    { id: 's3', productId: p3.id, time: t3, date: today, product: p3.name, qty: 3, unit: p3.unit || 'dona', price: p3.price, costPrice: p3.costPrice, total: p3.price * 3, seller: 'Azizbek', paymentType: 'Naqd' },
   ];
 };
 
@@ -621,26 +621,51 @@ export const StoreProvider = ({ children }) => {
     const mins = String(now.getMinutes()).padStart(2, '0');
     const timeStr = `${hours}:${mins}`;
 
+    // Snapshot exact cost price at the moment of sale
+    let costPrice = null;
+    let costStatus = 'unknown';
+
+    if (saleData.costPrice !== undefined && saleData.costPrice !== null && !isNaN(Number(saleData.costPrice)) && Number(saleData.costPrice) >= 0) {
+      costPrice = Number(saleData.costPrice);
+      costStatus = 'exact';
+    } else if (saleData.productId) {
+      const matchedProd = products.find(p => p.id === saleData.productId);
+      if (matchedProd && matchedProd.costPrice !== undefined && matchedProd.costPrice !== null && !isNaN(Number(matchedProd.costPrice)) && Number(matchedProd.costPrice) >= 0) {
+        costPrice = Number(matchedProd.costPrice);
+        costStatus = 'exact';
+      }
+    } else if (saleData.isDebtCollection) {
+      costPrice = 0;
+      costStatus = 'not_applicable';
+    }
+
     const newSale = {
-      id: 's-' + Date.now(),
+      id: saleData.id || ('s-' + Date.now()),
       time: timeStr,
       date: getLocalDateString(now),
-      product: saleData.productName,
+      productId: saleData.productId || null,
+      product: saleData.productName || saleData.product,
       emoji: saleData.emoji || '📦',
-      qty: Number(saleData.qty) || 1,
+      qty: Number(saleData.qty) !== undefined ? Number(saleData.qty) : 1,
       unit: saleData.unit || 'dona',
       price: Number(saleData.price) || 0,
-      total: (Number(saleData.qty) || 1) * (Number(saleData.price) || 0),
+      costPrice: costPrice,
+      costStatus: costStatus,
+      costSnapshotDate: now.toISOString(),
+      total: saleData.total !== undefined ? Number(saleData.total) : (Number(saleData.qty) || 1) * (Number(saleData.price) || 0),
       seller: currentUserName || saleData.seller || userName || 'Foydalanuvchi',
       sellerId: currentUserId,
-      paymentType: saleData.paymentType || 'Naqd',
+      paymentType: saleData.saleType === 'installment_contract' ? 'Nasiya' : (saleData.paymentType || 'Naqd'),
+      saleType: saleData.saleType || (saleData.isDebtCollection ? 'installment_payment' : 'retail'),
+      isDebtCollection: saleData.isDebtCollection === true,
+      contractId: saleData.contractId || null,
       storeId: currentStore.id
     };
 
     setSales(prev => [newSale, ...prev]);
 
-    // Decrease stock if product exists
-    if (saleData.productId) {
+    // Decrease stock if product exists and not a debt collection
+    if (saleData.productId && !saleData.isDebtCollection) {
       adjustStock(saleData.productId, -(Number(saleData.qty) || 1), userName);
     }
 
@@ -1276,18 +1301,45 @@ export const StoreProvider = ({ children }) => {
 
     newContract.status = computeContractStatus(newContract);
 
-    // Ombordan mahsulot miqdorini bir marta kamaytirish (Talab 6)
+    // Ombordan mahsulot miqdorini bir marta kamaytirish va tannarxni hisoblash
+    let contractCost = 0;
+    let hasAllCosts = true;
     for (const item of items) {
       adjustStock(item.productId, -Number(item.qty), userName);
+      const pr = products.find(p => p.id === item.productId);
+      if (pr && pr.costPrice !== undefined && pr.costPrice !== null && !isNaN(Number(pr.costPrice))) {
+        contractCost += Number(pr.costPrice) * (Number(item.qty) || 1);
+      } else {
+        hasAllCosts = false;
+      }
     }
 
-    // Boshlang'ich to'lov bo'lsa savdo tizimiga yozish (Talab 11)
+    // Tovar shartnomasi bo'yicha tovar realizatsiyasi tushumi, tovarlar soni va tannarx 1 marta hisobga olinadi
+    addSale({
+      productName: `Muddatli savdo: ${newContract.contractNumber} (${newContract.customerName})`,
+      qty: 1,
+      price: summary.totalAmount,
+      total: summary.totalAmount,
+      costPrice: hasAllCosts ? contractCost : null,
+      paymentType: 'Nasiya',
+      saleType: 'installment_contract',
+      isDebtCollection: false,
+      contractId: newContract.id,
+      seller: userName
+    }, userName);
+
+    // Boshlang'ich to'lov bo'lsa KASSA KIRIMI (Debt Collection) sifatida yozish (tovar savdosi emas!)
     if (summary.downPayment > 0) {
       addSale({
-        productName: `Muddatli savdo (Boshlang‘ich to‘lov): ${newContract.contractNumber} (${newContract.customerName})`,
-        qty: 1,
+        productName: `Muddatli to‘lov qabuli (Boshlang‘ich): ${newContract.contractNumber} (${newContract.customerName})`,
+        qty: 0,
         price: summary.downPayment,
+        total: summary.downPayment,
+        costPrice: 0,
         paymentType: contractData.paymentMethod || 'Naqd',
+        saleType: 'installment_payment',
+        isDebtCollection: true,
+        contractId: newContract.id,
         seller: userName
       }, userName);
     }
@@ -1329,12 +1381,17 @@ export const StoreProvider = ({ children }) => {
 
     setInstallments(prev => prev.map(c => c.id === contractId ? updatedContract : c));
 
-    // Pul tushumi sifatida savdo tizimiga yozish (omborga tegilmaydi)
+    // Pul tushumi sifatida savdo tizimiga yozish (omborga tegilmaydi, tovar savdosi deb hisoblanmaydi)
     addSale({
       productName: `Muddatli to‘lov qabuli: ${contract.contractNumber} (${contract.customerName})`,
-      qty: 1,
+      qty: 0,
       price: newPayment.amount,
+      total: newPayment.amount,
+      costPrice: 0,
       paymentType: newPayment.paymentMethod,
+      saleType: 'installment_payment',
+      isDebtCollection: true,
+      contractId: contract.id,
       seller: userName
     }, userName);
 
@@ -1375,6 +1432,14 @@ export const StoreProvider = ({ children }) => {
     };
 
     setInstallments(prev => prev.map(c => c.id === contractId ? updatedContract : c));
+
+    // Shartnomaga oid savdo va to'lovlarni bekor qilingan deb belgilash
+    setSales(prev => prev.map(s => {
+      if (s.contractId === contractId) {
+        return { ...s, isReturned: true, status: 'Bekor qilingan' };
+      }
+      return s;
+    }));
 
     logActivity(
       userName,
@@ -1440,6 +1505,17 @@ export const StoreProvider = ({ children }) => {
     };
 
     setInstallments(prev => prev.map(c => c.id === contractId ? restoredContract : c));
+
+    // Shartnomaga oid savdo va to'lovlarni qayta faollashtirish
+    setSales(prev => prev.map(s => {
+      if (s.contractId === contractId) {
+        const copy = { ...s };
+        delete copy.isReturned;
+        delete copy.status;
+        return copy;
+      }
+      return s;
+    }));
 
     logActivity(
       userName,

@@ -28,6 +28,7 @@ import {
 import { useStore } from '../context/StoreContext';
 import { useLanguage } from '../context/LanguageContext';
 import { getLocalDateString, getOffsetDateString } from '../utils/dateUtils';
+import { isReturnedSale, isDebtCollectionSale, aggregateSalesFinancials } from '../utils/financeUtils.js';
 
 export const Sales = () => {
   const { storeConfig, employees, currentStore, sales = [], products = [] } = useStore();
@@ -52,20 +53,34 @@ export const Sales = () => {
     return Math.min(15, Math.max(0.8, ratio));
   }, [storeConfig]);
 
-  // Helper: filter sales by date range
+  // Helper: filter sales by date range (excluding returns and future times)
   const filterSalesByPeriod = (period) => {
     const now = new Date();
     const todayStr = getLocalDateString(now);
+    const currentHour = now.getHours();
+
+    const isValidSale = (s) => {
+      if (!s || isReturnedSale(s) || isDebtCollectionSale(s)) return false;
+      const sDate = s.date || todayStr;
+      if (sDate > todayStr) return false;
+      if (sDate === todayStr && s.time) {
+        const h = parseInt(s.time.split(':')[0], 10);
+        if (!isNaN(h) && h > currentHour) return false;
+      }
+      return true;
+    };
+
     switch(period) {
       case 'Bugun':
-        return sales.filter(s => s.date === todayStr || !s.date);
+        return sales.filter(s => isValidSale(s) && (s.date === todayStr || !s.date));
       case 'Kecha': {
         const y = getOffsetDateString(-1, now);
-        return sales.filter(s => s.date === y);
+        return sales.filter(s => isValidSale(s) && s.date === y);
       }
       case 'Oxirgi 7 kun': {
         const d7 = getOffsetDateString(-7, now);
         return sales.filter(s => {
+          if (!isValidSale(s)) return false;
           const sDate = s.date || todayStr;
           return sDate >= d7 && sDate <= todayStr;
         });
@@ -73,6 +88,7 @@ export const Sales = () => {
       case 'Oxirgi 30 kun': {
         const d30 = getOffsetDateString(-30, now);
         return sales.filter(s => {
+          if (!isValidSale(s)) return false;
           const sDate = s.date || todayStr;
           return sDate >= d30 && sDate <= todayStr;
         });
@@ -80,12 +96,13 @@ export const Sales = () => {
       case 'Yil': {
         const yearStart = now.getFullYear() + '-01-01';
         return sales.filter(s => {
+          if (!isValidSale(s)) return false;
           const sDate = s.date || todayStr;
           return sDate >= yearStart && sDate <= todayStr;
         });
       }
       default:
-        return sales.filter(s => (s.date || todayStr) <= todayStr);
+        return sales.filter(s => isValidSale(s) && (s.date || todayStr) <= todayStr);
     }
   };
 
@@ -93,13 +110,37 @@ export const Sales = () => {
   const periodDataMap = useMemo(() => {
     const now = new Date();
     const todayStr = getLocalDateString(now);
+    const currentHour = now.getHours();
+
+    const isValidMerchandise = (s) => {
+      if (!s || isReturnedSale(s) || isDebtCollectionSale(s)) return false;
+      const sDate = s.date || todayStr;
+      if (sDate > todayStr) return false;
+      if (sDate === todayStr && s.time) {
+        const h = parseInt(s.time.split(':')[0], 10);
+        if (!isNaN(h) && h > currentHour) return false;
+      }
+      return true;
+    };
+
+    const isValidTransaction = (s) => {
+      if (!s || isReturnedSale(s)) return false;
+      const sDate = s.date || todayStr;
+      if (sDate > todayStr) return false;
+      if (sDate === todayStr && s.time) {
+        const h = parseInt(s.time.split(':')[0], 10);
+        if (!isNaN(h) && h > currentHour) return false;
+      }
+      return true;
+    };
 
     const getPeriodFilter = (p) => {
       if (p === 'Bugun') {
         const y = getOffsetDateString(-1, now);
         return {
-          current: (s) => (s.date === todayStr || !s.date),
-          previous: (s) => s.date === y,
+          current: (s) => isValidMerchandise(s) && (s.date === todayStr || !s.date),
+          previous: (s) => isValidMerchandise(s) && s.date === y,
+          currentAll: (s) => isValidTransaction(s) && (s.date === todayStr || !s.date),
           label: t('comparisonVsYesterday', 'kechagiga nisbatan')
         };
       }
@@ -107,8 +148,9 @@ export const Sales = () => {
         const y = getOffsetDateString(-1, now);
         const y2 = getOffsetDateString(-2, now);
         return {
-          current: (s) => s.date === y,
-          previous: (s) => s.date === y2,
+          current: (s) => isValidMerchandise(s) && s.date === y,
+          previous: (s) => isValidMerchandise(s) && s.date === y2,
+          currentAll: (s) => isValidTransaction(s) && s.date === y,
           label: t('comparisonVsPrevDay', 'undan oldingi kunga nisbatan')
         };
       }
@@ -116,14 +158,9 @@ export const Sales = () => {
         const d7 = getOffsetDateString(-7, now);
         const d14 = getOffsetDateString(-14, now);
         return {
-          current: (s) => {
-            const sDate = s.date || todayStr;
-            return sDate >= d7 && sDate <= todayStr;
-          },
-          previous: (s) => {
-            const sDate = s.date || todayStr;
-            return sDate >= d14 && sDate < d7;
-          },
+          current: (s) => isValidMerchandise(s) && (s.date || todayStr) >= d7 && (s.date || todayStr) <= todayStr,
+          previous: (s) => isValidMerchandise(s) && (s.date || todayStr) >= d14 && (s.date || todayStr) < d7,
+          currentAll: (s) => isValidTransaction(s) && (s.date || todayStr) >= d7 && (s.date || todayStr) <= todayStr,
           label: t('comparisonVsPrevious', 'oldingi 7 kunga nisbatan')
         };
       }
@@ -131,14 +168,9 @@ export const Sales = () => {
         const d30 = getOffsetDateString(-30, now);
         const d60 = getOffsetDateString(-60, now);
         return {
-          current: (s) => {
-            const sDate = s.date || todayStr;
-            return sDate >= d30 && sDate <= todayStr;
-          },
-          previous: (s) => {
-            const sDate = s.date || todayStr;
-            return sDate >= d60 && sDate < d30;
-          },
+          current: (s) => isValidMerchandise(s) && (s.date || todayStr) >= d30 && (s.date || todayStr) <= todayStr,
+          previous: (s) => isValidMerchandise(s) && (s.date || todayStr) >= d60 && (s.date || todayStr) < d30,
+          currentAll: (s) => isValidTransaction(s) && (s.date || todayStr) >= d30 && (s.date || todayStr) <= todayStr,
           label: t('comparisonVsPreviousMonth', 'oldingi 30 kunga nisbatan')
         };
       }
@@ -146,14 +178,9 @@ export const Sales = () => {
       const yStart = now.getFullYear() + '-01-01';
       const prevYStart = (now.getFullYear() - 1) + '-01-01';
       return {
-        current: (s) => {
-          const sDate = s.date || todayStr;
-          return sDate >= yStart && sDate <= todayStr;
-        },
-        previous: (s) => {
-          const sDate = s.date || todayStr;
-          return sDate >= prevYStart && sDate < yStart;
-        },
+        current: (s) => isValidMerchandise(s) && (s.date || todayStr) >= yStart && (s.date || todayStr) <= todayStr,
+        previous: (s) => isValidMerchandise(s) && (s.date || todayStr) >= prevYStart && (s.date || todayStr) < yStart,
+        currentAll: (s) => isValidTransaction(s) && (s.date || todayStr) >= yStart && (s.date || todayStr) <= todayStr,
         label: t('comparisonVsPreviousYear', 'o‘tgan yilga nisbatan')
       };
     };
@@ -180,10 +207,10 @@ export const Sales = () => {
       const prevAvgCheck = prevSalesCount > 0 ? Math.round(prevTotalSales / prevSalesCount) : 0;
       const avgCheckGrowthPct = prevAvgCheck > 0 ? (((averageCheck - prevAvgCheck) / prevAvgCheck) * 100).toFixed(1) : (averageCheck > 0 ? '+100' : '0');
 
-      const cashFiltered = filtered.filter(s => s.paymentType === 'Naqd' || !s.paymentType);
-      const cardFiltered = filtered.filter(s => s.paymentType === 'Karta');
-      const cashSales = cashFiltered.reduce((sum, s) => sum + (Number(s.total) || 0), 0);
-      const cardSales = cardFiltered.reduce((sum, s) => sum + (Number(s.total) || 0), 0);
+      // Kassa kirimi (Haqiqatda qabul qilingan Naqd va Karta to'lovlari)
+      const periodCashFin = aggregateSalesFinancials(sales.filter(cfg.currentAll), products, todayStr);
+      const cashSales = periodCashFin.cashSales;
+      const cardSales = periodCashFin.cardSales;
       const cashPct = totalSales > 0 ? ((cashSales / totalSales) * 100).toFixed(1) : '0';
       const cardPct = totalSales > 0 ? ((cardSales / totalSales) * 100).toFixed(1) : '0';
 

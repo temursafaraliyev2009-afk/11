@@ -94,6 +94,7 @@ export const QuickActionModal = ({ type, isOpen, onClose }) => {
       qty: Number(saleQty),
       unit: currentProdObj.unit,
       price: currentProdObj.price,
+      costPrice: currentProdObj.costPrice,
       seller: selectedSeller,
       paymentType: paymentType
     }, selectedSeller);

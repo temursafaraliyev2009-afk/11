@@ -29,6 +29,7 @@ import { useLanguage } from '../context/LanguageContext';
 import { QuickActionModal } from '../components/QuickActionModal';
 import { StoreIcon } from '../components/StoreIcon';
 import { getLocalDateString, getOffsetDateString, isToday } from '../utils/dateUtils';
+import { isReturnedSale, isDebtCollectionSale, aggregateSalesFinancials } from '../utils/financeUtils.js';
 
 export const Dashboard = ({ setActiveTab }) => {
   const { user } = useAuth();
@@ -64,30 +65,44 @@ export const Dashboard = ({ setActiveTab }) => {
     return Math.min(15, Math.max(0.8, ratio));
   }, [storeConfig]);
 
-  // Real today's sales from shared state
+  // Real today's sales from shared state (filtering returns, debt collections, and future hours)
   const today = useMemo(() => getLocalDateString(), []);
-  const todaySalesList = useMemo(() => sales.filter(s => isToday(s.date)), [sales, today]);
+  const todaySalesList = useMemo(() => {
+    const currentHour = new Date().getHours();
+    return sales.filter(s => {
+      if (!s || !isToday(s.date) || isReturnedSale(s) || isDebtCollectionSale(s)) return false;
+      if (s.time) {
+        const h = parseInt(s.time.split(':')[0], 10);
+        if (!isNaN(h) && h > currentHour) return false;
+      }
+      return true;
+    });
+  }, [sales, today]);
   
-  // Bugungi jami savdo summasi
+  // Bugungi jami tovar savdosi summasi
   const todaySalesAmount = useMemo(() => {
     return todaySalesList.reduce((sum, s) => sum + (Number(s.total) || 0), 0);
   }, [todaySalesList]);
   
-  // Bugungi savdolar soni
+  // Bugungi tovar savdolari soni
   const todaySalesCount = todaySalesList.length;
 
-  // Bugungi to'lov turlari
-  const todayCashSales = useMemo(() => {
-    return todaySalesList
-      .filter(s => !s.paymentType || s.paymentType === 'Naqd')
-      .reduce((sum, s) => sum + (Number(s.total) || 0), 0);
-  }, [todaySalesList]);
+  // Bugungi to'lov turlari (Kassa kirimi: Haqiqatda qabul qilingan Naqd va Karta to'lovlari)
+  const todayFinSummary = useMemo(() => {
+    const currentHour = new Date().getHours();
+    const todayAllSales = sales.filter(s => {
+      if (!s || !isToday(s.date) || isReturnedSale(s)) return false;
+      if (s.time) {
+        const h = parseInt(s.time.split(':')[0], 10);
+        if (!isNaN(h) && h > currentHour) return false;
+      }
+      return true;
+    });
+    return aggregateSalesFinancials(todayAllSales, products, today);
+  }, [sales, products, today]);
 
-  const todayCardSales = useMemo(() => {
-    return todaySalesList
-      .filter(s => s.paymentType === 'Karta')
-      .reduce((sum, s) => sum + (Number(s.total) || 0), 0);
-  }, [todaySalesList]);
+  const todayCashSales = todayFinSummary.cashSales;
+  const todayCardSales = todayFinSummary.cardSales;
 
   // Bugun sotilgan mahsulotlar bo'yicha ma'lumotlar
   const todayProductsBreakdown = useMemo(() => {
@@ -109,8 +124,20 @@ export const Dashboard = ({ setActiveTab }) => {
     return Object.values(map).sort((a, b) => b.total - a.total);
   }, [todaySalesList]);
 
-  // All-time sales stats (filtered up to today)
-  const validAllSales = useMemo(() => sales.filter(s => (s.date || today) <= today), [sales, today]);
+  // All-time merchandise sales stats (filtered up to today, excluding future, returns, and debt collections)
+  const validAllSales = useMemo(() => {
+    const currentHour = new Date().getHours();
+    return sales.filter(s => {
+      if (!s || isReturnedSale(s) || isDebtCollectionSale(s)) return false;
+      const sDate = s.date || today;
+      if (sDate > today) return false;
+      if (sDate === today && s.time) {
+        const h = parseInt(s.time.split(':')[0], 10);
+        if (!isNaN(h) && h > currentHour) return false;
+      }
+      return true;
+    });
+  }, [sales, today]);
   const allSalesAmount = useMemo(() => validAllSales.reduce((sum, s) => sum + (Number(s.total) || 0), 0), [validAllSales]);
   const allSalesCount = validAllSales.length;
 
@@ -118,10 +145,10 @@ export const Dashboard = ({ setActiveTab }) => {
   const displaySalesAmount = selectedTimeRange === 'Barchasi' ? allSalesAmount : todaySalesAmount;
   const displaySalesCount = selectedTimeRange === 'Barchasi' ? allSalesCount : todaySalesCount;
 
-  // Real percentage comparison (today vs yesterday from real data)
+  // Real percentage comparison (today vs yesterday from real data, strictly excluding returns and debt collections)
   const salesGrowthPct = useMemo(() => {
     const yesterdayStr = getOffsetDateString(-1);
-    const yesterdaySales = sales.filter(s => s.date === yesterdayStr);
+    const yesterdaySales = sales.filter(s => s.date === yesterdayStr && !isReturnedSale(s) && !isDebtCollectionSale(s));
     const yesterdaySum = yesterdaySales.reduce((sum, s) => sum + (Number(s.total) || 0), 0);
     if (yesterdaySum === 0) return todaySalesAmount > 0 ? '+100' : '0';
     const pct = (((todaySalesAmount - yesterdaySum) / yesterdaySum) * 100).toFixed(1);
@@ -230,14 +257,15 @@ export const Dashboard = ({ setActiveTab }) => {
   // Top products pie/donut data — from real sales aggregation
   const pieData = useMemo(() => {
     const COLORS = ['#10B981', '#3B82F6', '#06B6D4', '#8B5CF6', '#F59E0B', '#EC4899'];
-    if (sales.length === 0) {
-      return storeConfig.sampleTopProducts || [
-        { name: 'Ma\'lumot yo\'q', value: 1, percentage: '100%', color: '#CBD5E1' },
+    const activeValidSales = sales.filter(s => s && !isReturnedSale(s) && (s.date || today) <= today);
+    if (activeValidSales.length === 0) {
+      return [
+        { name: "Ma'lumot yo'q", value: 1, percentage: '100%', color: '#CBD5E1' },
       ];
     }
     // Aggregate sales by product name
     const productMap = {};
-    sales.forEach(s => {
+    activeValidSales.forEach(s => {
       const name = s.product || 'Noma\'lum';
       if (!productMap[name]) productMap[name] = 0;
       productMap[name] += Number(s.qty) || 1;

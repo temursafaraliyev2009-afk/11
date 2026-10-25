@@ -25,11 +25,13 @@ import {
   Bar,
   XAxis,
   YAxis,
-  Tooltip
+  Tooltip,
+  Cell
 } from 'recharts';
 import { useStore } from '../context/StoreContext';
 import { useLanguage } from '../context/LanguageContext';
 import { getLocalDateString, getOffsetDateString, isToday } from '../utils/dateUtils';
+import { buildPeriodFinancialReports, calculateProductProfitability } from '../utils/financeUtils.js';
 
 export const Reports = () => {
   const {
@@ -68,299 +70,38 @@ export const Reports = () => {
     return Math.min(15, Math.max(0.8, ratio));
   }, [storeConfig]);
 
-  // Average profit margin from actual products
+  // Average profit margin from actual products with verified cost
   const avgMargin = useMemo(() => {
-    if (products.length > 0) {
-      const sumMargin = products.reduce((acc, p) => {
+    const verifiedProducts = products.filter(p => p.costPrice !== undefined && p.costPrice !== null && !isNaN(Number(p.costPrice)) && Number(p.costPrice) >= 0);
+    if (verifiedProducts.length > 0) {
+      const sumMargin = verifiedProducts.reduce((acc, p) => {
         const pr = Number(p.price) || 0;
-        const cp = Number(p.costPrice) || (pr * 0.72);
-        return acc + (pr > 0 ? (pr - cp) / pr : 0.3);
+        const cp = Number(p.costPrice) || 0;
+        return acc + (pr > 0 ? (pr - cp) / pr : 0);
       }, 0);
-      return Math.min(0.6, Math.max(0.15, sumMargin / products.length));
+      return Math.min(0.6, Math.max(0.15, sumMargin / verifiedProducts.length));
     }
-    return 0.337;
+    return 0.3;
   }, [products]);
 
   // Dynamic Time periods configuration and real data model for sales
   const periodDataMap = useMemo(() => {
-    const now = new Date();
-    const today = getLocalDateString(now);
-    const currentHour = now.getHours();
-    const currentDayOfMonth = now.getDate();
-    const currentMonthNum = now.getMonth() + 1; // 1-12
-    const currentYear = today.substring(0, 4);
-    const currentYearMonth = today.substring(0, 7);
-
-    // Filter valid sales up to today
-    const validSales = sales.filter(s => {
-      const sDate = s.date || today;
-      return sDate <= today;
-    });
-
-    const todaySales = validSales.filter(s => (s.date === today || !s.date));
-    const marginPctStr = (avgMargin * 100).toFixed(1) + '%';
-
-    // 1. BUGUN: hourly breakdown
-    const todayHours = [
-      { label: '08:00', startHour: 8, endHour: 9 },
-      { label: '10:00', startHour: 10, endHour: 11 },
-      { label: '12:00', startHour: 12, endHour: 13 },
-      { label: '14:00', startHour: 14, endHour: 15 },
-      { label: '16:00', startHour: 16, endHour: 17 },
-      { label: '18:00', startHour: 18, endHour: 19 },
-      { label: '20:00', startHour: 20, endHour: 23 },
-    ];
-
-    const todayChartData = todayHours.map((slot) => {
-      const isFutureSlot = currentHour < slot.startHour;
-      let savdo = 0;
-      if (!isFutureSlot) {
-        const slotSales = todaySales.filter(s => {
-          const h = parseInt((s.time || '12:00').split(':')[0], 10);
-          return h >= slot.startHour && h <= slot.endHour && h <= currentHour;
-        });
-        savdo = slotSales.reduce((sum, s) => sum + (Number(s.total) || 0), 0);
-      }
-      const foyda = Math.round(savdo * avgMargin);
-      const xarajat = savdo - foyda;
-      return {
-        label: slot.label,
-        fullDate: `Bugun, ${slot.label}`,
-        savdo,
-        foyda,
-        xarajat
-      };
-    });
-
-    const todayRevTotal = todayChartData.reduce((s, d) => s + d.savdo, 0);
-    const todayProfitTotal = todayChartData.reduce((s, d) => s + d.foyda, 0);
-    const todayMax = Math.max(...todayChartData.map(d => d.savdo), 100000);
-    const todayYMax = Math.ceil((todayMax * 1.25) / 100000) * 100000;
-
-    // Yesterday sales for comparison
-    const yesterdayStr = getOffsetDateString(-1, now);
-    const yesterdaySales = validSales.filter(s => s.date === yesterdayStr);
-    const todayPrevRev = yesterdaySales.reduce((sum, s) => sum + (Number(s.total) || 0), 0);
-    const todayPrevProfit = Math.round(todayPrevRev * avgMargin);
-    const todayGrowth = todayPrevRev > 0 ? (((todayRevTotal - todayPrevRev) / todayPrevRev) * 100).toFixed(1) : (todayRevTotal > 0 ? '+100' : '0');
-    const todayProfitGrowth = todayPrevProfit > 0 ? (((todayProfitTotal - todayPrevProfit) / todayPrevProfit) * 100).toFixed(1) : (todayProfitTotal > 0 ? '+100' : '0');
-
-    // 2. HAFTA: Current week breakdown (Dush - Yak)
-    const dayNames = ['Dush', 'Sesh', 'Chor', 'Pay', 'Jum', 'Shan', 'Yak'];
-    const currentDayOfWeek = (now.getDay() + 6) % 7; // 0=Monday, 6=Sunday
-    const monday = new Date(now);
-    monday.setDate(now.getDate() - currentDayOfWeek);
-    monday.setHours(0, 0, 0, 0);
-
-    const weekDaysInfo = [];
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(monday);
-      d.setDate(monday.getDate() + i);
-      const dStr = getLocalDateString(d);
-      const parts = dStr.split('-');
-      const formattedDate = `${parts[2]}.${parts[1]}`;
-      weekDaysInfo.push({
-        label: dayNames[i],
-        dateStr: dStr,
-        fullDate: `${dayNames[i]}, ${formattedDate}`,
-        isFuture: dStr > today
-      });
-    }
-
-    const weekChartData = weekDaysInfo.map(d => {
-      let savdo = 0;
-      if (!d.isFuture) {
-        const daySales = validSales.filter(s => (s.date || today) === d.dateStr);
-        savdo = daySales.reduce((sum, s) => sum + (Number(s.total) || 0), 0);
-      }
-      const foyda = Math.round(savdo * avgMargin);
-      const xarajat = savdo - foyda;
-      return {
-        label: d.label,
-        fullDate: d.fullDate,
-        savdo,
-        foyda,
-        xarajat
-      };
-    });
-
-    const weekRevTotal = weekChartData.reduce((s, d) => s + d.savdo, 0);
-    const weekProfitTotal = weekChartData.reduce((s, d) => s + d.foyda, 0);
-    const weekSalesList = validSales.filter(s => {
-      const sDate = s.date || today;
-      return weekDaysInfo.some(w => !w.isFuture && w.dateStr === sDate);
-    });
-
-    // Previous week (7 days before Monday)
-    const prevWeekMonday = new Date(monday);
-    prevWeekMonday.setDate(prevWeekMonday.getDate() - 7);
-    const prevWeekDays = [];
-    for (let i = 0; i < 7; i++) {
-      const pd = new Date(prevWeekMonday);
-      pd.setDate(prevWeekMonday.getDate() + i);
-      prevWeekDays.push(getLocalDateString(pd));
-    }
-    const prevWeekSales = validSales.filter(s => prevWeekDays.includes(s.date));
-    const weekPrevRev = prevWeekSales.reduce((sum, s) => sum + (Number(s.total) || 0), 0);
-    const weekPrevProfit = Math.round(weekPrevRev * avgMargin);
-    const weekGrowth = weekPrevRev > 0 ? (((weekRevTotal - weekPrevRev) / weekPrevRev) * 100).toFixed(1) : (weekRevTotal > 0 ? '+100' : '0');
-    const weekProfitGrowth = weekPrevProfit > 0 ? (((weekProfitTotal - weekPrevProfit) / weekPrevProfit) * 100).toFixed(1) : (weekProfitTotal > 0 ? '+100' : '0');
-    const weekMax = Math.max(...weekChartData.map(d => d.savdo), 100000);
-    const weekYMax = Math.ceil((weekMax * 1.25) / 100000) * 100000;
-
-    // 3. OY: 4 weeks breakdown in current month
-    const monthWeeks = [
-      { label: '1-hafta', fullDate: '1-7 kunlar', minDay: 1, maxDay: 7 },
-      { label: '2-hafta', fullDate: '8-14 kunlar', minDay: 8, maxDay: 14 },
-      { label: '3-hafta', fullDate: '15-21 kunlar', minDay: 15, maxDay: 21 },
-      { label: '4-hafta', fullDate: '22-oxiri', minDay: 22, maxDay: 31 },
-    ];
-
-    const monthSales = validSales.filter(s => (s.date || today).startsWith(currentYearMonth));
-
-    const monthChartData = monthWeeks.map(w => {
-      let savdo = 0;
-      if (w.minDay <= currentDayOfMonth) {
-        const wSales = monthSales.filter(s => {
-          const dayNum = parseInt((s.date || today).split('-')[2], 10);
-          return dayNum >= w.minDay && dayNum <= Math.min(w.maxDay, currentDayOfMonth);
-        });
-        savdo = wSales.reduce((sum, s) => sum + (Number(s.total) || 0), 0);
-      }
-      const foyda = Math.round(savdo * avgMargin);
-      const xarajat = savdo - foyda;
-      return {
-        label: w.label,
-        fullDate: `${w.label} (${w.fullDate})`,
-        savdo,
-        foyda,
-        xarajat
-      };
-    });
-
-    const monthRevTotal = monthChartData.reduce((s, d) => s + d.savdo, 0);
-    const monthProfitTotal = monthChartData.reduce((s, d) => s + d.foyda, 0);
-
-    // Previous month sales
-    const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const prevYearMonth = getLocalDateString(prevMonthDate).substring(0, 7);
-    const prevMonthSales = validSales.filter(s => (s.date || '').startsWith(prevYearMonth));
-    const monthPrevRev = prevMonthSales.reduce((sum, s) => sum + (Number(s.total) || 0), 0);
-    const monthPrevProfit = Math.round(monthPrevRev * avgMargin);
-    const monthGrowth = monthPrevRev > 0 ? (((monthRevTotal - monthPrevRev) / monthPrevRev) * 100).toFixed(1) : (monthRevTotal > 0 ? '+100' : '0');
-    const monthProfitGrowth = monthPrevProfit > 0 ? (((monthProfitTotal - monthPrevProfit) / monthPrevProfit) * 100).toFixed(1) : (monthProfitTotal > 0 ? '+100' : '0');
-    const monthMax = Math.max(...monthChartData.map(d => d.savdo), 200000);
-    const monthYMax = Math.ceil((monthMax * 1.25) / 200000) * 200000;
-
-    // 4. YIL: 12 months breakdown
-    const yearMonthLabels = [
-      'Yan', 'Fev', 'Mar', 'Apr', 'May', 'Iyun',
-      'Iyul', 'Avg', 'Sen', 'Okt', 'Noy', 'Dek'
-    ];
-    const yearSales = validSales.filter(s => (s.date || today).startsWith(currentYear));
-
-    const yearChartData = yearMonthLabels.map((mLabel, i) => {
-      let savdo = 0;
-      const monthIndex = i + 1; // 1-12
-      if (monthIndex <= currentMonthNum) {
-        const mStr = String(monthIndex).padStart(2, '0');
-        const mSales = yearSales.filter(s => (s.date || today).substring(5, 7) === mStr);
-        savdo = mSales.reduce((sum, s) => sum + (Number(s.total) || 0), 0);
-      }
-      const foyda = Math.round(savdo * avgMargin);
-      const xarajat = savdo - foyda;
-      return {
-        label: mLabel,
-        fullDate: `${mLabel} ${currentYear}`,
-        savdo,
-        foyda,
-        xarajat
-      };
-    });
-
-    const yearRevTotal = yearChartData.reduce((s, d) => s + d.savdo, 0);
-    const yearProfitTotal = yearChartData.reduce((s, d) => s + d.foyda, 0);
-
-    // Previous year sales
-    const prevYearStr = String(now.getFullYear() - 1);
-    const prevYearSales = validSales.filter(s => (s.date || '').startsWith(prevYearStr));
-    const yearPrevRev = prevYearSales.reduce((sum, s) => sum + (Number(s.total) || 0), 0);
-    const yearPrevProfit = Math.round(yearPrevRev * avgMargin);
-    const yearGrowth = yearPrevRev > 0 ? (((yearRevTotal - yearPrevRev) / yearPrevRev) * 100).toFixed(1) : (yearRevTotal > 0 ? '+100' : '0');
-    const yearProfitGrowth = yearPrevProfit > 0 ? (((yearProfitTotal - yearPrevProfit) / yearPrevProfit) * 100).toFixed(1) : (yearProfitTotal > 0 ? '+100' : '0');
-    const yearMax = Math.max(...yearChartData.map(d => d.savdo), 1000000);
-    const yearYMax = Math.ceil((yearMax * 1.25) / 1000000) * 1000000;
-
-    return {
-      'Bugun': {
-        currentRevenue: todayRevTotal,
-        previousRevenue: todayPrevRev,
-        growthPct: `${Number(todayGrowth) >= 0 ? '↑' : '↓'} ${Math.abs(Number(todayGrowth))}%`,
-        profitGrowthPct: `${Number(todayProfitGrowth) >= 0 ? '↑' : '↓'} ${Math.abs(Number(todayProfitGrowth))}%`,
-        salesCount: todaySales.length,
-        comparisonText: t('comparisonVsYesterday', 'kechagiga nisbatan'),
-        profit: todayProfitTotal,
-        previousProfit: todayPrevProfit,
-        profitMargin: marginPctStr,
-        chartData: todayChartData,
-        yAxisMax: todayYMax,
-        yAxisTicks: [0, Math.round(todayYMax / 3), Math.round((todayYMax * 2) / 3), todayYMax],
-        formatY: (val) => val >= 1000000 ? `${(val / 1000000).toFixed(1).replace('.0', '')}M` : `${Math.round(val / 1000)}k`
-      },
-      'Hafta': {
-        currentRevenue: weekRevTotal,
-        previousRevenue: weekPrevRev,
-        growthPct: `${Number(weekGrowth) >= 0 ? '↑' : '↓'} ${Math.abs(Number(weekGrowth))}%`,
-        profitGrowthPct: `${Number(weekProfitGrowth) >= 0 ? '↑' : '↓'} ${Math.abs(Number(weekProfitGrowth))}%`,
-        salesCount: weekSalesList.length,
-        comparisonText: t('comparisonVsPrevious', 'o‘tgan haftaga nisbatan'),
-        profit: weekProfitTotal,
-        previousProfit: weekPrevProfit,
-        profitMargin: marginPctStr,
-        chartData: weekChartData,
-        yAxisMax: weekYMax,
-        yAxisTicks: [0, Math.round(weekYMax / 3), Math.round((weekYMax * 2) / 3), weekYMax],
-        formatY: (val) => val >= 1000000 ? `${(val / 1000000).toFixed(1).replace('.0', '')}M` : `${Math.round(val / 1000)}k`
-      },
-      'Oy': {
-        currentRevenue: monthRevTotal,
-        previousRevenue: monthPrevRev,
-        growthPct: `${Number(monthGrowth) >= 0 ? '↑' : '↓'} ${Math.abs(Number(monthGrowth))}%`,
-        profitGrowthPct: `${Number(monthProfitGrowth) >= 0 ? '↑' : '↓'} ${Math.abs(Number(monthProfitGrowth))}%`,
-        salesCount: monthSales.length,
-        comparisonText: t('comparisonVsPreviousMonth', 'o‘tgan oyga nisbatan'),
-        profit: monthProfitTotal,
-        previousProfit: monthPrevProfit,
-        profitMargin: marginPctStr,
-        chartData: monthChartData,
-        yAxisMax: monthYMax,
-        yAxisTicks: [0, Math.round(monthYMax / 4), Math.round(monthYMax / 2), Math.round((monthYMax * 3) / 4), monthYMax],
-        formatY: (val) => `${(val / 1000000).toFixed(1).replace('.0', '')}M`
-      },
-      'Yil': {
-        currentRevenue: yearRevTotal,
-        previousRevenue: yearPrevRev,
-        growthPct: `${Number(yearGrowth) >= 0 ? '↑' : '↓'} ${Math.abs(Number(yearGrowth))}%`,
-        profitGrowthPct: `${Number(yearProfitGrowth) >= 0 ? '↑' : '↓'} ${Math.abs(Number(yearProfitGrowth))}%`,
-        salesCount: yearSales.length,
-        comparisonText: t('comparisonVsPreviousYear', 'o‘tgan yilga nisbatan'),
-        profit: yearProfitTotal,
-        previousProfit: yearPrevProfit,
-        profitMargin: marginPctStr,
-        chartData: yearChartData,
-        yAxisMax: yearYMax,
-        yAxisTicks: [0, Math.round(yearYMax / 4), Math.round(yearYMax / 2), Math.round((yearYMax * 3) / 4), yearYMax],
-        formatY: (val) => `${(val / 1000000).toFixed(0)}M`
-      }
-    };
-  }, [sales, avgMargin, storeRevenueScale, t]);
+    const reports = buildPeriodFinancialReports(sales, products);
+    reports['Bugun'].comparisonText = t('comparisonVsYesterday', 'kechagiga nisbatan');
+    reports['Hafta'].comparisonText = t('comparisonVsPrevious', 'o‘tgan haftaga nisbatan');
+    reports['Oy'].comparisonText = t('comparisonVsPreviousMonth', 'o‘tgan oyga nisbatan');
+    reports['Yil'].comparisonText = t('comparisonVsPreviousYear', 'o‘tgan yilga nisbatan');
+    return reports;
+  }, [sales, products, t]);
 
   const activePeriodData = periodDataMap[timeFilter] || periodDataMap['Bugun'] || periodDataMap['Hafta'];
 
-  // Real inventory calculations
+  // Real inventory calculations (separating verified cost from unknown cost)
   const totalStockCount = products.reduce((sum, p) => sum + (Number(p.stock) || 0), 0);
   const totalStockRetailValue = stats.totalInventoryValue ?? products.reduce((sum, p) => sum + ((Number(p.stock) || 0) * (Number(p.price) || 0)), 0);
-  const totalStockCostValue = products.reduce((sum, p) => sum + ((Number(p.stock) || 0) * (Number(p.costPrice) || (Number(p.price) * 0.72))), 0);
+  const verifiedCostProducts = products.filter(p => p.costPrice !== undefined && p.costPrice !== null && !isNaN(Number(p.costPrice)) && Number(p.costPrice) >= 0);
+  const totalStockCostValue = verifiedCostProducts.reduce((sum, p) => sum + ((Number(p.stock) || 0) * Number(p.costPrice)), 0);
+  const unverifiedStockProductsCount = products.length - verifiedCostProducts.length;
   const potentialInventoryProfit = Math.max(0, totalStockRetailValue - totalStockCostValue);
 
   // Real debt calculations
@@ -371,9 +112,10 @@ export const Reports = () => {
 
   // Real profit calculations linked directly to activePeriodData
   const baseRevenue = activePeriodData.currentRevenue;
-  const realCost = Math.round(baseRevenue * (1 - avgMargin));
-  const realProfit = Math.round(baseRevenue - realCost);
-  const realMarginPct = (avgMargin * 100).toFixed(1) + '%';
+  const realCost = activePeriodData.cost;
+  const realProfit = activePeriodData.profit;
+  const realMarginPct = activePeriodData.profitMargin;
+  const isOverallLoss = activePeriodData.isLoss;
 
   const getInventoryStatusBadge = (status) => {
     if (status === 'Yetarli') return 'bg-emerald-50 text-emerald-700 border border-emerald-200/80';
@@ -562,21 +304,26 @@ export const Reports = () => {
               </div>
             </div>
 
-            {/* Card 2: Sof foyda */}
-            <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs hover:shadow-md hover:border-emerald-200 transition-all flex items-center justify-between group">
+            {/* Card 2: Yalpi foyda / Yalpi zarar */}
+            <div className={`bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs hover:shadow-md transition-all flex items-center justify-between group ${activePeriodData.isLoss ? 'hover:border-rose-200' : 'hover:border-emerald-200'}`}>
               <div className="space-y-1">
                 <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 block">
-                  {t('netProfitTitle', 'Sof foyda')}
+                  {activePeriodData.isLoss ? t('grossLossTitle', 'Yalpi zarar') : t('grossProfitTitle', 'Yalpi foyda')}
                 </span>
-                <div className="text-2xl sm:text-[26px] font-black text-emerald-600 tracking-tight">
-                  {activePeriodData.profit.toLocaleString()} <span className="text-sm font-bold text-emerald-600/70">{t('sum', 'so‘m')}</span>
+                <div className={`text-2xl sm:text-[26px] font-black tracking-tight ${activePeriodData.isLoss ? 'text-rose-600' : 'text-emerald-600'}`}>
+                  {activePeriodData.isLoss ? `-${Math.abs(activePeriodData.profit).toLocaleString()}` : activePeriodData.profit.toLocaleString()} <span className={`text-sm font-bold ${activePeriodData.isLoss ? 'text-rose-500' : 'text-emerald-600/70'}`}>{t('sum', 'so‘m')}</span>
                 </div>
-                <div className="text-[11px] font-bold text-emerald-600 flex items-center gap-1 mt-1">
+                <div className={`text-[11px] font-bold flex items-center gap-1 mt-1 ${activePeriodData.isLoss ? 'text-rose-600' : 'text-emerald-600'}`}>
                   <span>{activePeriodData.profitGrowthPct}</span>
                   <span className="text-[10px] text-slate-400 font-medium">{activePeriodData.comparisonText}</span>
                 </div>
+                {activePeriodData.hasUnverifiedCosts && (
+                  <div className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-lg border border-amber-200/60 inline-block mt-1">
+                    * {activePeriodData.unverifiedCount} ta tovar tannarxisiz
+                  </div>
+                )}
               </div>
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white flex items-center justify-center shadow-lg shadow-emerald-500/25 shrink-0 group-hover:scale-105 transition-transform">
+              <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${activePeriodData.isLoss ? 'from-rose-500 to-red-600 shadow-rose-500/25' : 'from-emerald-500 to-teal-600 shadow-emerald-500/25'} text-white flex items-center justify-center shadow-lg shrink-0 group-hover:scale-105 transition-transform`}>
                 <TrendingUp className="w-6 h-6 stroke-[2.2]" />
               </div>
             </div>
@@ -606,7 +353,7 @@ export const Reports = () => {
                   {t('totalExpensesTitle', 'Xarajatlar')}
                 </span>
                 <div className="text-2xl sm:text-[26px] font-black text-amber-600 tracking-tight">
-                  {(activePeriodData.currentRevenue - activePeriodData.profit).toLocaleString()} <span className="text-sm font-bold text-amber-500">{t('sum', 'so‘m')}</span>
+                  {activePeriodData.cost.toLocaleString()} <span className="text-sm font-bold text-amber-500">{t('sum', 'so‘m')}</span>
                 </div>
                 <div className="text-[11px] font-semibold text-slate-400 mt-1">
                   {t('costAndOperatingExpenses', 'Tannarx va operatsion xarajatlar')}
@@ -637,7 +384,7 @@ export const Reports = () => {
                 </div>
                 <div className="flex items-center space-x-2">
                   <span className="w-3 h-3 rounded-full bg-emerald-500"></span>
-                  <span className="text-slate-700">{t('netProfitTitle', 'Sof foyda')}</span>
+                  <span className="text-slate-700">{t('grossProfitTitle', 'Yalpi foyda')}</span>
                 </div>
               </div>
             </div>
@@ -646,17 +393,22 @@ export const Reports = () => {
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={activePeriodData.chartData} margin={{ top: 20, right: 20, left: -10, bottom: 10 }}>
                   <XAxis dataKey="label" stroke="#94A3B8" fontSize={11} fontWeight={700} axisLine={false} tickLine={false} />
-                  <YAxis stroke="#94A3B8" fontSize={10} fontWeight={600} axisLine={false} tickLine={false} tickFormatter={activePeriodData.formatY} domain={[0, activePeriodData.yAxisMax]} ticks={activePeriodData.yAxisTicks} />
+                  <YAxis stroke="#94A3B8" fontSize={10} fontWeight={600} axisLine={false} tickLine={false} tickFormatter={activePeriodData.formatY} domain={[activePeriodData.yAxisMin, activePeriodData.yAxisMax]} />
                   <Tooltip
                     content={({ active, payload }) => {
                       if (active && payload && payload.length) {
                         const item = payload[0].payload;
+                        const isLoss = item.foyda < 0;
                         return (
                           <div className="bg-white p-3.5 rounded-2xl shadow-xl border border-slate-100 text-xs font-bold space-y-1 font-sans">
                             <div className="text-slate-400 text-[10px] uppercase font-black">{item.fullDate || item.label}</div>
                             <div className="text-blue-600">{t('revenueTitle', 'Tushum')}: {payload[0].value.toLocaleString()} {t('sum', 'so‘m')}</div>
-                            {payload[1] && <div className="text-emerald-600">{t('netProfitTitle', 'Foyda')}: {payload[1].value.toLocaleString()} {t('sum', 'so‘m')}</div>}
-                            <div className="text-slate-500 text-[11px]">{t('totalExpensesTitle', 'Xarajat')}: {(item.xarajat || 0).toLocaleString()} {t('sum', 'so‘m')}</div>
+                            <div className="text-slate-500 text-[11px]">{t('totalExpensesTitle', 'Xarajat / Tannarx')}: {(item.xarajat || 0).toLocaleString()} {t('sum', 'so‘m')}</div>
+                            {payload[1] && (
+                              <div className={isLoss ? 'text-rose-600 font-black' : 'text-emerald-600 font-black'}>
+                                {isLoss ? t('grossLossTitle', 'Yalpi zarar') : t('grossProfitTitle', 'Yalpi foyda')}: {isLoss ? `-${Math.abs(item.foyda).toLocaleString()}` : item.foyda.toLocaleString()} {t('sum', 'so‘m')}
+                              </div>
+                            )}
                           </div>
                         );
                       }
@@ -664,7 +416,11 @@ export const Reports = () => {
                     }}
                   />
                   <Bar dataKey="savdo" fill="#3B82F6" radius={[8, 8, 0, 0]} maxBarSize={45} />
-                  <Bar dataKey="foyda" fill="#10B981" radius={[8, 8, 0, 0]} maxBarSize={45} />
+                  <Bar dataKey="foyda" radius={[8, 8, 0, 0]} maxBarSize={45}>
+                    {activePeriodData.chartData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.foyda < 0 ? '#EF4444' : '#10B981'} />
+                    ))}
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -713,19 +469,19 @@ export const Reports = () => {
               </div>
             </div>
 
-            <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs hover:shadow-md hover:border-emerald-200 transition-all flex items-center justify-between group">
+            <div className={`bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs hover:shadow-md transition-all flex items-center justify-between group ${isOverallLoss ? 'hover:border-rose-200' : 'hover:border-emerald-200'}`}>
               <div className="space-y-1">
                 <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 block">
-                  {t('netOperatingProfit', 'Sof Operatsion Foyda')}
+                  {isOverallLoss ? t('netOperatingLoss', 'Sof Operatsion Zarar') : t('netOperatingProfit', 'Sof Operatsion Foyda')}
                 </span>
-                <div className="text-2xl sm:text-[26px] font-black text-emerald-600 tracking-tight">
-                  {realProfit.toLocaleString()} <span className="text-sm font-bold text-emerald-600/70">{t('sum', 'so‘m')}</span>
+                <div className={`text-2xl sm:text-[26px] font-black tracking-tight ${isOverallLoss ? 'text-rose-600' : 'text-emerald-600'}`}>
+                  {isOverallLoss ? `-${Math.abs(realProfit).toLocaleString()}` : realProfit.toLocaleString()} <span className={`text-sm font-bold ${isOverallLoss ? 'text-rose-500' : 'text-emerald-600/70'}`}>{t('sum', 'so‘m')}</span>
                 </div>
-                <div className="text-[11px] font-bold text-emerald-600 flex items-center gap-1 mt-1">
-                  <span>{t('grossProfitability', 'Yalpi daromadlilik')}</span>
+                <div className={`text-[11px] font-bold flex items-center gap-1 mt-1 ${isOverallLoss ? 'text-rose-600' : 'text-emerald-600'}`}>
+                  <span>{isOverallLoss ? t('lossOperations', 'Zararli davr natijasi') : t('grossProfitability', 'Yalpi daromadlilik')}</span>
                 </div>
               </div>
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white flex items-center justify-center shadow-lg shadow-emerald-500/25 shrink-0 group-hover:scale-105 transition-transform">
+              <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${isOverallLoss ? 'from-rose-500 to-red-600 shadow-rose-500/25' : 'from-emerald-500 to-teal-600 shadow-emerald-500/25'} text-white flex items-center justify-center shadow-lg shrink-0 group-hover:scale-105 transition-transform`}>
                 <TrendingUp className="w-6 h-6 stroke-[2.2]" />
               </div>
             </div>
@@ -778,10 +534,7 @@ export const Reports = () => {
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium">
                   {products.map(p => {
-                    const price = Number(p.price) || 0;
-                    const cost = Number(p.costPrice) || Math.round(price * 0.72);
-                    const unitProfit = Math.max(0, price - cost);
-                    const margin = price > 0 ? ((unitProfit / price) * 100).toFixed(1) : '0';
+                    const prof = calculateProductProfitability(p);
                     return (
                       <tr key={p.id} className="hover:bg-slate-50/80 transition-colors">
                         <td className="py-4 px-6 font-bold text-slate-900 flex items-center gap-2">
@@ -789,12 +542,18 @@ export const Reports = () => {
                           <span>{tProduct(p.name)}</span>
                         </td>
                         <td className="py-4 px-6 text-slate-500 font-medium">{tCategory(p.category || 'Asosiy')}</td>
-                        <td className="py-4 px-6 font-bold text-slate-800">{price.toLocaleString()} {t('sum', 'so‘m')}</td>
-                        <td className="py-4 px-6 font-medium text-slate-500">{cost.toLocaleString()} {t('sum', 'so‘m')}</td>
-                        <td className="py-4 px-6 font-black text-emerald-600">+{unitProfit.toLocaleString()} {t('sum', 'so‘m')}</td>
+                        <td className="py-4 px-6 font-bold text-slate-800">{prof.price.toLocaleString()} {t('sum', 'so‘m')}</td>
+                        <td className="py-4 px-6 font-medium text-slate-500">{prof.cost.toLocaleString()} {t('sum', 'so‘m')}</td>
+                        <td className={`py-4 px-6 font-black ${prof.isLoss ? 'text-rose-600' : 'text-emerald-600'}`}>
+                          {prof.isLoss ? `-${Math.abs(prof.unitProfit).toLocaleString()}` : `+${prof.unitProfit.toLocaleString()}`} {t('sum', 'so‘m')}
+                        </td>
                         <td className="py-4 px-6 text-right">
-                          <span className="inline-block px-2.5 py-1 rounded-xl text-xs font-black bg-emerald-50 text-emerald-700 border border-emerald-200/80">
-                            {margin}%
+                          <span className={`inline-block px-2.5 py-1 rounded-xl text-xs font-black ${
+                            prof.isLoss
+                              ? 'bg-rose-50 text-rose-700 border border-rose-200/80'
+                              : 'bg-emerald-50 text-emerald-700 border border-emerald-200/80'
+                          }`}>
+                            {prof.margin}%
                           </span>
                         </td>
                       </tr>

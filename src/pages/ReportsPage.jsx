@@ -8,10 +8,12 @@ import {
   XAxis,
   YAxis,
   Tooltip,
-  CartesianGrid
+  CartesianGrid,
+  Cell
 } from 'recharts';
 import { useStore } from '../context/StoreContext';
 import { getLocalDateString } from '../utils/dateUtils';
+import { aggregateSalesFinancials, isReturnedSale, isDebtCollectionSale } from '../utils/financeUtils.js';
 
 export const ReportsPage = () => {
   const { sales = [], products = [], currentStore, isEmployee } = useStore();
@@ -19,26 +21,23 @@ export const ReportsPage = () => {
 
   const now = new Date();
   const todayStr = getLocalDateString(now);
+  const currentHour = now.getHours();
   const currentYear = todayStr.substring(0, 4);
   const currentMonthNum = now.getMonth() + 1; // 1-12
 
-  // Average profit margin
-  const avgMargin = useMemo(() => {
-    if (products.length > 0) {
-      const sumMargin = products.reduce((acc, p) => {
-        const pr = Number(p.price) || 0;
-        const cp = Number(p.costPrice) || (pr * 0.72);
-        return acc + (pr > 0 ? (pr - cp) / pr : 0.3);
-      }, 0);
-      return Math.min(0.6, Math.max(0.15, sumMargin / products.length));
-    }
-    return 0.33;
-  }, [products]);
-
-  // Valid non-future sales
+  // Valid non-future merchandise sales excluding returns and debt collections
   const validSales = useMemo(() => {
-    return sales.filter(s => (s.date || todayStr) <= todayStr);
-  }, [sales, todayStr]);
+    return sales.filter(s => {
+      if (!s) return false;
+      const sDate = s.date || todayStr;
+      if (sDate > todayStr) return false;
+      if (sDate === todayStr && s.time) {
+        const h = parseInt(s.time.split(':')[0], 10);
+        if (!isNaN(h) && h > currentHour) return false;
+      }
+      return !isReturnedSale(s) && !isDebtCollectionSale(s);
+    });
+  }, [sales, todayStr, currentHour]);
 
   // Year sales
   const yearSales = useMemo(() => {
@@ -51,18 +50,25 @@ export const ReportsPage = () => {
     return monthLabels.map((month, i) => {
       const mIdx = i + 1;
       let monthRev = 0;
+      let monthProfit = 0;
+      let isLoss = false;
+
       if (mIdx <= currentMonthNum) {
         const mStr = String(mIdx).padStart(2, '0');
         const mSales = yearSales.filter(s => (s.date || todayStr).substring(5, 7) === mStr);
-        monthRev = mSales.reduce((sum, s) => sum + (Number(s.total) || 0), 0);
+        const mFin = aggregateSalesFinancials(mSales, products, todayStr);
+        monthRev = mFin.revenue;
+        monthProfit = mFin.profit;
+        isLoss = mFin.isLoss;
       }
       return {
         month,
         sales: monthRev,
-        profit: Math.round(monthRev * avgMargin)
+        profit: monthProfit,
+        isLoss
       };
     });
-  }, [yearSales, currentMonthNum, todayStr, avgMargin]);
+  }, [yearSales, currentMonthNum, todayStr, products]);
 
   // Current month stats
   const curMonthStr = String(currentMonthNum).padStart(2, '0');
@@ -70,10 +76,15 @@ export const ReportsPage = () => {
     return yearSales.filter(s => (s.date || todayStr).substring(5, 7) === curMonthStr);
   }, [yearSales, curMonthStr, todayStr]);
 
-  const currentMonthRev = currentMonthSales.reduce((sum, s) => sum + (Number(s.total) || 0), 0);
-  const currentMonthProfit = Math.round(currentMonthRev * avgMargin);
-  const currentMonthCount = currentMonthSales.length;
-  const currentMonthAvgCheck = currentMonthCount > 0 ? Math.round(currentMonthRev / currentMonthCount) : 0;
+  const currentMonthFin = useMemo(() => {
+    return aggregateSalesFinancials(currentMonthSales, products, todayStr);
+  }, [currentMonthSales, products, todayStr]);
+
+  const currentMonthRev = currentMonthFin.revenue;
+  const currentMonthProfit = currentMonthFin.profit;
+  const currentMonthCount = currentMonthFin.count;
+  const currentMonthAvgCheck = currentMonthFin.avgCheck;
+  const isCurrentMonthLoss = currentMonthFin.isLoss;
 
   if (isEmployee) {
     return (
@@ -112,11 +123,15 @@ export const ReportsPage = () => {
         </div>
 
         <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm">
-          <div className="text-xs font-bold text-slate-400">{t('netProfit', 'Sof Foyda')}</div>
-          <div className="text-2xl font-black text-purple-600 mt-1">{currentMonthProfit.toLocaleString()} {t('sum', "so'm")}</div>
-          <div className="flex items-center text-xs text-emerald-500 font-bold mt-2">
-            <ArrowUpRight className="w-4 h-4" />
-            <span>{(avgMargin * 100).toFixed(1)}% {t('marginRate', 'marja darajasi')}</span>
+          <div className="text-xs font-bold text-slate-400">
+            {isCurrentMonthLoss ? t('grossLossTitle', 'Yalpi Zarar') : t('grossProfitTitle', 'Yalpi Foyda')}
+          </div>
+          <div className={`text-2xl font-black mt-1 ${isCurrentMonthLoss ? 'text-rose-600' : 'text-purple-600'}`}>
+            {isCurrentMonthLoss ? `-${Math.abs(currentMonthProfit).toLocaleString()}` : currentMonthProfit.toLocaleString()} {t('sum', "so'm")}
+          </div>
+          <div className={`flex items-center text-xs font-bold mt-2 ${isCurrentMonthLoss ? 'text-rose-500' : 'text-emerald-500'}`}>
+            {isCurrentMonthLoss ? <ArrowDownRight className="w-4 h-4" /> : <ArrowUpRight className="w-4 h-4" />}
+            <span>{currentMonthFin.marginStr} {t('marginRate', 'marja darajasi')}</span>
           </div>
         </div>
 
@@ -139,9 +154,13 @@ export const ReportsPage = () => {
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
               <XAxis dataKey="month" stroke="#94A3B8" fontSize={11} axisLine={false} tickLine={false} />
               <YAxis stroke="#94A3B8" fontSize={10} axisLine={false} tickLine={false} tickFormatter={(val) => `${val / 1000000}M`} />
-              <Tooltip formatter={(val) => `${val.toLocaleString()} ${t('sum', "so'm")}`} />
+              <Tooltip formatter={(val, name) => [`${val.toLocaleString()} ${t('sum', "so'm")}`, name]} />
               <Bar dataKey="sales" name={t('revenueTitle', 'Tushum')} fill="#3B82F6" radius={[8, 8, 0, 0]} />
-              <Bar dataKey="profit" name={t('netProfit', 'Sof Foyda')} fill="#10B981" radius={[8, 8, 0, 0]} />
+              <Bar dataKey="profit" name={t('grossProfitTitle', 'Yalpi Foyda')} radius={[8, 8, 0, 0]}>
+                {monthlyData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.isLoss ? '#EF4444' : '#10B981'} />
+                ))}
+              </Bar>
             </BarChart>
           </ResponsiveContainer>
         </div>
