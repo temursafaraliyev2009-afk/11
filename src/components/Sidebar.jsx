@@ -20,6 +20,7 @@ import { useAuth } from '../context/AuthContext';
 import { useStore, isRentalSupportedStoreType, isDebtsSupportedStoreType, isInstallmentSupportedStoreType } from '../context/StoreContext';
 import { useLanguage } from '../context/LanguageContext';
 import { StoreIcon } from './StoreIcon';
+import { SavatchiLogo } from './SavatchiLogo';
 
 export const Sidebar = ({ activeTab, setActiveTab, isOpen, setIsOpen }) => {
   const [isOthersOpen, setIsOthersOpen] = useState(true);
@@ -73,30 +74,24 @@ export const Sidebar = ({ activeTab, setActiveTab, isOpen, setIsOpen }) => {
         }`}
       >
         {/* Top Section: Logo & Main Navigation */}
-        <div className="space-y-6 pr-0.5">
-          {/* Brand Logo Header */}
-          <div className="flex items-center justify-between pb-1">
-            <div className="flex items-center space-x-3.5">
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-600 via-indigo-500 to-purple-500 p-0.5 shadow-lg shadow-blue-500/25 flex items-center justify-center shrink-0">
-                <div className="w-full h-full bg-[#0B132B] rounded-[14px] flex items-center justify-center">
-                  <ShoppingBag className="w-6 h-6 text-blue-400" />
-                </div>
-              </div>
-              <div>
-                <h1 className="text-xl font-black tracking-tight text-white flex items-center gap-1.5 leading-none">
-                  {t('appName', 'Savatchi')}
-                </h1>
-                <p className="text-[11px] font-semibold text-slate-400 tracking-wide mt-1.5 line-clamp-1">
-                  {t('appSubtitle', 'Sizning onlayn do‘koningiz')}
-                </p>
-              </div>
+        <div className="space-y-5 pr-0.5">
+          {/* Brand Logo Header: Icon-only logo + SAVATCHI text below */}
+          <div className="relative flex flex-col items-center justify-center py-2 gap-1.5">
+            {/* Icon-only logo, ~10-15% smaller than 120px */}
+            <div className="w-full max-w-[104px] flex items-center justify-center">
+              <SavatchiLogo theme="dark" showText={false} className="w-full h-auto object-contain" />
             </div>
+
+            {/* SAVATCHI matn pastda, qalin va ravshan */}
+            <span className="text-white font-black text-sm tracking-[0.25em] uppercase select-none leading-none">
+              SAVATCHI
+            </span>
 
             {/* Mobile Close Button */}
             {setIsOpen && (
               <button
                 onClick={() => setIsOpen(false)}
-                className="lg:hidden p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                className="lg:hidden absolute right-0 top-1/2 -translate-y-1/2 p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
                 aria-label="Menyuni yopish"
               >
                 <X className="w-5 h-5" />

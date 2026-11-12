@@ -33,6 +33,7 @@ import { useToast } from '../context/ToastContext';
 import { SettingsModal } from './SettingsModal';
 import { MailboxModal } from './MailboxModal';
 import { HelpModal } from './HelpModal';
+import { CreateStoreModal } from './CreateStoreModal';
 import { StoreIcon } from './StoreIcon';
 import { getPendingInvitationsCount } from '../services/mailService';
 
@@ -46,6 +47,7 @@ export const DashboardHeader = ({
 }) => {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isStoreSwitcherOpen, setIsStoreSwitcherOpen] = useState(false);
+  const [isCreateStoreOpen, setIsCreateStoreOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isMailboxOpen, setIsMailboxOpen] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
@@ -555,31 +557,54 @@ export const DashboardHeader = ({
 
 
         {/* 2. Interactive Store Switcher Pill & Dropdown */}
+        {/* Store Type Pill / Switcher */}
         <div className="relative" ref={storeMenuRef}>
-          <button
-            onClick={() => setIsStoreSwitcherOpen(!isStoreSwitcherOpen)}
-            className="flex items-center space-x-2.5 px-3 py-2 bg-white hover:bg-slate-50 rounded-2xl border border-slate-200/80 shadow-xs transition-colors text-xs font-semibold text-slate-700 cursor-pointer"
-            title={t('switchStore', 'Do‘konni almashtirish')}
-          >
-            <div className="w-6 h-6 rounded-lg bg-blue-50 text-blue-600 border border-blue-200/60 flex items-center justify-center shrink-0">
-              <StoreIcon type={currentStoreType} className="w-3.5 h-3.5" />
-            </div>
-            <div className="text-left hidden sm:block">
-              <div className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wider leading-none">
-                {t('store', 'Do‘kon')}
+          {!isEmployee ? (
+            <button
+              onClick={() => setIsStoreSwitcherOpen(!isStoreSwitcherOpen)}
+              className="flex items-center space-x-2.5 px-3 py-2 bg-white hover:bg-slate-50 rounded-2xl border border-slate-200/80 shadow-xs transition-colors text-xs font-semibold text-slate-700 cursor-pointer"
+              title={t('switchStore', 'Do‘konni almashtirish')}
+            >
+              <div className="w-6 h-6 rounded-lg bg-blue-50 text-blue-600 border border-blue-200/60 flex items-center justify-center shrink-0">
+                <StoreIcon type={currentStoreType} className="w-3.5 h-3.5" />
               </div>
-              <div className="text-slate-900 font-black leading-tight truncate max-w-[130px]">
-                {currentStore?.name || storeConfig.name}
+              <div className="text-left hidden sm:block">
+                <div className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wider leading-none">
+                  {t('store', 'Do‘kon')}
+                </div>
+                <div className="text-slate-900 font-black leading-tight truncate max-w-[130px]">
+                  {currentStore?.name || storeConfig.name}
+                </div>
               </div>
+              <ChevronDown
+                className="w-3.5 h-3.5 text-slate-400 transition-transform duration-200"
+                style={{ transform: isStoreSwitcherOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}
+              />
+            </button>
+          ) : (
+            <div
+              className="flex items-center space-x-2.5 px-3 py-2 bg-white rounded-2xl border border-slate-200/80 shadow-xs text-xs font-semibold text-slate-700 select-none"
+              title="Biriktirilgan do‘kon"
+            >
+              <div className="w-6 h-6 rounded-lg bg-blue-50 text-blue-600 border border-blue-200/60 flex items-center justify-center shrink-0">
+                <StoreIcon type={currentStoreType} className="w-3.5 h-3.5" />
+              </div>
+              <div className="text-left hidden sm:block">
+                <div className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wider leading-none">
+                  {t('store', 'Do‘kon')}
+                </div>
+                <div className="text-slate-900 font-black leading-tight truncate max-w-[130px]">
+                  {currentStore?.name || storeConfig.name}
+                </div>
+              </div>
+              <span className="text-[10px] font-black px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-600 border border-emerald-200">
+                Xodim
+              </span>
             </div>
-            <ChevronDown
-              className="w-3.5 h-3.5 text-slate-400 transition-transform duration-200"
-              style={{ transform: isStoreSwitcherOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}
-            />
-          </button>
+          )}
 
-          {/* Store Switcher Dropdown Menu */}
-          {isStoreSwitcherOpen && (
+          {/* Store Switcher Dropdown Menu (Faqat do'kon egasi uchun) */}
+          {!isEmployee && isStoreSwitcherOpen && (
             <div className="absolute right-0 mt-2 w-72 bg-white rounded-3xl shadow-2xl border border-slate-100 py-3 z-50 animate-in fade-in slide-in-from-top-2 duration-150 font-sans">
               <div className="px-4 py-2 border-b border-slate-100 flex items-center justify-between">
                 <span className="text-xs font-black text-slate-900">{t('myStores', 'Mavjud do‘konlar')}</span>
@@ -595,9 +620,12 @@ export const DashboardHeader = ({
                     <button
                       key={st.id}
                       onClick={() => {
+                        const isActuallySwitching = Boolean(currentStore?.id && currentStore.id !== st.id);
                         switchStore(st.id);
                         setIsStoreSwitcherOpen(false);
-                        notifyInfo(t('storeSwitched', 'Do‘kon almashtirildi'), `"${st.name}" do‘koniga muvaffaqiyatli o‘tildi.`);
+                        if (isActuallySwitching) {
+                          notifyInfo(t('storeSwitched', 'Do‘kon almashtirildi'), `"${st.name}" do‘koniga muvaffaqiyatli o‘tildi.`, { position: 'center' });
+                        }
                       }}
                       className={`w-full flex items-center justify-between p-2.5 rounded-2xl text-xs transition-all cursor-pointer ${
                         isSelected
@@ -618,6 +646,21 @@ export const DashboardHeader = ({
                     </button>
                   );
                 })}
+              </div>
+
+              {/* Pastki qism: Yangi do'kon qo'shish tugmasi */}
+              <div className="p-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsStoreSwitcherOpen(false);
+                    setIsCreateStoreOpen(true);
+                  }}
+                  className="w-full flex items-center justify-center space-x-2 py-2.5 px-3 rounded-2xl bg-blue-50 hover:bg-blue-100 text-blue-600 font-extrabold text-xs transition-colors cursor-pointer border border-blue-200/60 shadow-xs"
+                >
+                  <Plus className="w-4 h-4 text-blue-600" />
+                  <span>{t('openNewStore', 'Yangi do‘kon')}</span>
+                </button>
               </div>
             </div>
           )}
@@ -845,6 +888,12 @@ export const DashboardHeader = ({
       <HelpModal
         isOpen={isHelpOpen}
         onClose={() => setIsHelpOpen(false)}
+      />
+
+      {/* Create New Store Modal */}
+      <CreateStoreModal
+        isOpen={isCreateStoreOpen}
+        onClose={() => setIsCreateStoreOpen(false)}
       />
     </header>
   );

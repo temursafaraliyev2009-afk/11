@@ -1,5 +1,5 @@
 // src/pages/StoreTypeSelection.jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ShoppingBag,
   ArrowRight,
@@ -9,7 +9,8 @@ import {
   Store,
   Plus,
   CheckCircle2,
-  X
+  X,
+  Mail
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useStore } from '../context/StoreContext';
@@ -17,41 +18,97 @@ import { useLanguage } from '../context/LanguageContext';
 import { useToast } from '../context/ToastContext';
 import { BackgroundWaves } from '../components/BackgroundWaves';
 import { StoreBadgeIcon, StoreIcon } from '../components/StoreIcon';
+import { MailboxModal } from '../components/MailboxModal';
+import { getPendingInvitationsCount } from '../services/mailService';
+import { SavatchiLogo } from '../components/SavatchiLogo';
 
 export const StoreTypeSelection = ({ onSelectComplete }) => {
   const { user } = useAuth();
-  const { userStores, currentStore, switchStore, createNewStore } = useStore();
+  const { userStores, currentStore, switchStore, createNewStore, selectedStoreId, isEmployee } = useStore();
   const { t } = useLanguage();
-  const { notifySuccess, notifyInfo } = useToast();
+  const { notifySuccess, notifyInfo, notifyError } = useToast();
 
   const [createModalType, setCreateModalType] = useState(null); // store card object
   const [newStoreName, setNewStoreName] = useState('');
+  const [isMailboxOpen, setIsMailboxOpen] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
+
+  // Xodim avtomatik o'z do'koniga yo'naltiriladi (Talab 9: SelectStore sahifasiga yuborilmasin)
+  useEffect(() => {
+    if (isEmployee && selectedStoreId && onSelectComplete) {
+      onSelectComplete(selectedStoreId);
+    }
+  }, [isEmployee, selectedStoreId, onSelectComplete]);
+
+  useEffect(() => {
+    const updateCount = () => {
+      setPendingCount(getPendingInvitationsCount(user));
+    };
+    updateCount();
+    window.addEventListener('savatchi_mail_updated', updateCount);
+    window.addEventListener('savatchi_invitation_accepted', updateCount);
+    window.addEventListener('savatchi_invitation_rejected', updateCount);
+    return () => {
+      window.removeEventListener('savatchi_mail_updated', updateCount);
+      window.removeEventListener('savatchi_invitation_accepted', updateCount);
+      window.removeEventListener('savatchi_invitation_rejected', updateCount);
+    };
+  }, [user]);
+
+  useEffect(() => {
+    const handleAccepted = (e) => {
+      const storeId = e.detail?.storeId;
+      if (storeId && onSelectComplete) {
+        onSelectComplete(storeId);
+      }
+    };
+    window.addEventListener('savatchi_invitation_accepted', handleAccepted);
+    return () => window.removeEventListener('savatchi_invitation_accepted', handleAccepted);
+  }, [onSelectComplete]);
 
   const handleSelectExisting = (storeId) => {
+    const isActuallySwitching = Boolean(selectedStoreId && selectedStoreId !== storeId);
     switchStore(storeId);
     const targetStore = userStores.find(s => s.id === storeId);
-    notifyInfo(t('storeSwitched', 'Do‘kon almashtirildi'), `"${targetStore?.name || 'Do‘kon'}" paneliga o‘tildi.`);
+    if (isActuallySwitching) {
+      notifyInfo(t('storeSwitched', 'Do‘kon almashtirildi'), `"${targetStore?.name || 'Do‘kon'}" paneliga o‘tildi.`, { position: 'center' });
+    } else {
+      notifySuccess(t('storeSelected', 'Do‘kon tanlandi'), `"${targetStore?.name || 'Do‘kon'}" do‘koni faollashtirildi.`);
+    }
     if (onSelectComplete) {
       onSelectComplete(storeId);
     }
   };
 
   const handleOpenCreateModal = (card) => {
+    if (isEmployee) {
+      notifyError('Ruxsat cheklangan', 'Xodimlar yangi do‘kon ochish huquqiga ega emas!');
+      return;
+    }
     setCreateModalType(card);
     setNewStoreName(`Savatchi ${card.title} Do‘koni`);
   };
 
-  const handleConfirmCreate = (e) => {
+  const handleConfirmCreate = async (e) => {
     e.preventDefault();
+    if (isEmployee) {
+      notifyError('Ruxsat cheklangan', 'Xodimlar yangi do‘kon ochish huquqiga ega emas!');
+      setCreateModalType(null);
+      return;
+    }
     if (!createModalType) return;
-    const created = createNewStore({
-      name: newStoreName,
-      type: createModalType.id
-    });
-    notifySuccess(t('storeCreated', 'Do‘kon ochildi!'), `"${newStoreName}" do‘koni muvaffaqiyatli yaratildi.`);
-    setCreateModalType(null);
-    if (onSelectComplete) {
-      onSelectComplete(created.id);
+    try {
+      const created = await createNewStore({
+        name: newStoreName,
+        type: createModalType.id
+      });
+      notifySuccess(t('storeCreated', 'Do‘kon ochildi!'), `"${newStoreName}" do‘koni muvaffaqiyatli yaratildi.`);
+      setCreateModalType(null);
+      if (onSelectComplete && created?.id) {
+        onSelectComplete(created.id);
+      }
+    } catch (err) {
+      notifyError(t('storeCreateFailed', 'Xatolik yuz berdi'), err.message || 'Do‘kon yaratishda xatolik yuz berdi.');
     }
   };
 
@@ -128,10 +185,8 @@ export const StoreTypeSelection = ({ onSelectComplete }) => {
       {/* Top Navbar */}
       <header className="relative z-10 px-6 lg:px-12 py-5 flex items-center justify-between border-b border-slate-200/60 bg-white/70 backdrop-blur-md">
         <div className="flex items-center space-x-3.5">
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-blue-600 via-indigo-500 to-purple-500 p-0.5 shadow-lg shadow-blue-500/25 flex items-center justify-center shrink-0">
-            <div className="w-full h-full bg-[#0B132B] rounded-[14px] flex items-center justify-center">
-              <ShoppingBag className="w-5 h-5 text-blue-400" />
-            </div>
+          <div className="w-11 h-11 rounded-2xl bg-white p-0.5 shadow-lg shadow-blue-500/10 flex items-center justify-center shrink-0 border border-slate-100 overflow-hidden">
+            <SavatchiLogo className="w-full h-full object-contain" />
           </div>
           <div>
             <h1 className="text-xl font-black tracking-tight text-slate-900 leading-none">
@@ -144,10 +199,54 @@ export const StoreTypeSelection = ({ onSelectComplete }) => {
         </div>
 
 
+        {/* Right side: Mailbox & Pending invitations */}
+        <div className="flex items-center space-x-3">
+          <button
+            onClick={() => setIsMailboxOpen(true)}
+            className="relative p-2.5 rounded-2xl bg-white border border-slate-200/80 text-slate-600 hover:text-slate-900 shadow-xs cursor-pointer hover:bg-slate-50 transition-colors flex items-center gap-2"
+            title="Pochta va takliflar"
+          >
+            <Mail className="w-5 h-5 text-slate-600" />
+            <span className="hidden sm:inline text-xs font-bold text-slate-700">Pochta</span>
+            {pendingCount > 0 && (
+              <span className="w-5 h-5 bg-rose-500 text-white text-[10px] font-black rounded-full flex items-center justify-center animate-pulse shadow-xs">
+                {pendingCount}
+              </span>
+            )}
+          </button>
+        </div>
       </header>
 
       {/* Main Selection Area */}
       <main className="relative z-10 flex-1 max-w-7xl mx-auto px-6 lg:px-8 py-10 w-full">
+        {/* Pending Invitation Alert Banner */}
+        {pendingCount > 0 && (
+          <div className="mb-8 p-5 sm:p-6 rounded-3xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white shadow-xl shadow-blue-500/20 flex flex-col sm:flex-row items-center justify-between gap-4 animate-in fade-in slide-in-from-top-4 duration-300">
+            <div className="flex items-center gap-4 text-center sm:text-left">
+              <div className="w-12 h-12 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center shrink-0 border border-white/20 shadow-inner">
+                <Mail className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-white/20 text-white border border-white/30 inline-block mb-1">
+                  Yangi xodimlik taklifi ({pendingCount})
+                </span>
+                <h3 className="text-base sm:text-lg font-black text-white">
+                  Sizga do‘konga qo‘shilish uchun xodimlik taklifi yuborilgan!
+                </h3>
+                <p className="text-xs text-blue-100 font-medium mt-0.5">
+                  Taklifni qabul qilib, to‘g‘ridan-to‘g‘ri do‘kon boshqaruv paneliga kiring.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setIsMailboxOpen(true)}
+              className="w-full sm:w-auto px-6 py-3 rounded-2xl bg-white text-blue-600 hover:bg-blue-50 font-black text-xs shadow-lg shadow-black/10 transition-all flex items-center justify-center gap-2 cursor-pointer shrink-0 active:scale-95"
+            >
+              <Mail className="w-4 h-4 text-blue-600" />
+              <span>Taklifni ochish va qabul qilish</span>
+            </button>
+          </div>
+        )}
         {/* Title Header */}
         <div className="text-center max-w-2xl mx-auto space-y-3 mb-10">
           <span className="text-[11px] font-extrabold uppercase tracking-widest px-3 py-1 rounded-full bg-blue-100 text-blue-700 border border-blue-200">
@@ -165,7 +264,7 @@ export const StoreTypeSelection = ({ onSelectComplete }) => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {storeCards.map((card) => {
             const existingStore = userStores.find(s => s.type === card.id);
-            const isCurrentlySelected = currentStore?.type === card.id;
+            const isCurrentlySelected = Boolean(selectedStoreId && currentStore?.id && (currentStore.id === existingStore?.id || currentStore.type === card.id));
 
             return (
               <div
@@ -280,6 +379,8 @@ export const StoreTypeSelection = ({ onSelectComplete }) => {
           </div>
         </div>
       )}
+      {/* Mailbox Modal */}
+      <MailboxModal isOpen={isMailboxOpen} onClose={() => setIsMailboxOpen(false)} />
     </div>
   );
 };

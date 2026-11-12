@@ -33,11 +33,13 @@ export const Inventory = () => {
     storeConfig,
     currentStore,
     searchTargetItem,
-    setSearchTargetItem
+    setSearchTargetItem,
+    isItemPendingDelete,
+    setItemPendingDelete
   } = useStore();
 
   const { t } = useLanguage();
-  const { notifySuccess, notifyDelete } = useToast();
+  const { notifySuccess, notifyDelete, showUndoDelete } = useToast();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
@@ -61,14 +63,17 @@ export const Inventory = () => {
     }
   }, [searchTargetItem, products, setSearchTargetItem]);
 
+  // Faol (o'chirish jarayonida bo'lmagan) mahsulotlar ro'yxati
+  const activeProducts = products.filter(p => !isItemPendingDelete(p.id));
+
   // Stats calculation
-  const totalProductsCount = products.length;
-  const lowStockCount = products.filter(p => p.status === 'Kam').length;
-  const outOfStockCount = products.filter(p => p.status === 'Tugagan' || Number(p.stock) === 0).length;
-  const totalInventoryValue = products.reduce((sum, p) => sum + ((Number(p.stock) || 0) * (Number(p.price) || 0)), 0);
+  const totalProductsCount = activeProducts.length;
+  const lowStockCount = activeProducts.filter(p => p.status === 'Kam').length;
+  const outOfStockCount = activeProducts.filter(p => p.status === 'Tugagan' || Number(p.stock) === 0).length;
+  const totalInventoryValue = activeProducts.reduce((sum, p) => sum + ((Number(p.stock) || 0) * (Number(p.price) || 0)), 0);
 
   // Filter & Sort
-  let filteredProducts = products.filter(p => {
+  let filteredProducts = activeProducts.filter(p => {
     const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           p.category?.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           (p.brand && p.brand.toLowerCase().includes(searchQuery.toLowerCase())) ||
@@ -274,7 +279,6 @@ export const Inventory = () => {
               <tr className="bg-slate-50/90 text-slate-400 font-extrabold uppercase text-[11px] tracking-wider border-b border-slate-200/80">
                 <th className="py-4 px-6">{t('colProduct', 'Mahsulot')}</th>
                 <th className="py-4 px-6">{t('colCategory', 'Kategoriya')}</th>
-                <th className="py-4 px-6">Xususiyatlari ({storeConfig.name})</th>
                 <th className="py-4 px-6">{t('colStock', 'Qoldiq')}</th>
                 <th className="py-4 px-6">{t('colPrice', 'Sotish narxi')}</th>
                 <th className="py-4 px-6">{t('colCostPrice', 'Tannarx')}</th>
@@ -285,7 +289,7 @@ export const Inventory = () => {
             <tbody className="divide-y divide-slate-100 font-medium">
               {filteredProducts.length === 0 ? (
                 <tr>
-                  <td colSpan="8" className="text-center py-16 text-slate-400 font-semibold text-sm">
+                  <td colSpan="7" className="text-center py-16 text-slate-400 font-semibold text-sm">
                     {t('error', 'Hech qanday mahsulot topilmadi')}
                   </td>
                 </tr>
@@ -312,55 +316,6 @@ export const Inventory = () => {
                       <span className="px-3 py-1 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold inline-block">
                         {p.category}
                       </span>
-                    </td>
-
-                    {/* Store-specific attributes column */}
-                    <td className="py-4 px-6 text-xs text-slate-600">
-                      <div className="flex flex-wrap items-center gap-1.5 max-w-xs">
-                        {p.storage && (
-                          <span className="px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 font-bold text-[10px]">
-                            {p.storage}
-                          </span>
-                        )}
-                        {p.ram && (
-                          <span className="px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 font-bold text-[10px]">
-                            RAM: {p.ram}
-                          </span>
-                        )}
-                        {p.color && (
-                          <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-medium text-[10px]">
-                            {p.color}
-                          </span>
-                        )}
-                        {p.imei && (
-                          <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 font-mono text-[10px]" title="IMEI">
-                            IMEI: {p.imei.slice(0, 8)}...
-                          </span>
-                        )}
-                        {p.size && (
-                          <span className="px-2 py-0.5 rounded-md bg-purple-50 text-purple-700 font-bold text-[10px]">
-                            {p.size}
-                          </span>
-                        )}
-                        {p.gender && (
-                          <span className="px-2 py-0.5 rounded-md bg-pink-50 text-pink-700 font-medium text-[10px]">
-                            {p.gender}
-                          </span>
-                        )}
-                        {p.volume && (
-                          <span className="px-2 py-0.5 rounded-md bg-rose-50 text-rose-700 font-bold text-[10px]">
-                            {p.volume}
-                          </span>
-                        )}
-                        {p.expiryDate && (
-                          <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 font-medium text-[10px]">
-                            {p.expiryDate}
-                          </span>
-                        )}
-                        {!p.storage && !p.size && !p.volume && !p.brand && (
-                          <span className="text-slate-400 font-normal text-[11px]">—</span>
-                        )}
-                      </div>
                     </td>
 
                     {/* Stock with quick +/- buttons */}
@@ -562,9 +517,31 @@ export const Inventory = () => {
               <button
                 type="button"
                 onClick={() => {
-                  deleteProduct(deletingProduct.id);
-                  notifyDelete(t('prodDeleted', 'Mahsulot o‘chirildi'), `"${deletingProduct.name}" ombordan olib tashlandi.`);
+                  const targetProduct = deletingProduct;
                   setDeletingProduct(null);
+                  if (!targetProduct || isItemPendingDelete(targetProduct.id)) return;
+
+                  // 1. Vaqtincha interfeysdan yashirish (bazaga tegilmaydi)
+                  setItemPendingDelete(targetProduct.id, true);
+
+                  // 2. 5 soniyalik bekor qilish bildirishnomasini ko'rsatish
+                  showUndoDelete({
+                    title: 'Mahsulot o‘chirilmoqda...',
+                    seconds: 5,
+                    successMessage: 'Mahsulot muvaffaqiyatli o‘chirildi.',
+                    onUndo: () => {
+                      setItemPendingDelete(targetProduct.id, false);
+                    },
+                    onCommit: async () => {
+                      try {
+                        deleteProduct(targetProduct.id);
+                        setItemPendingDelete(targetProduct.id, false);
+                      } catch (err) {
+                        setItemPendingDelete(targetProduct.id, false);
+                        throw err;
+                      }
+                    }
+                  });
                 }}
                 className="flex-1 py-3 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-lg shadow-rose-600/25 transition-all cursor-pointer"
               >

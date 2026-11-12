@@ -36,11 +36,13 @@ export const Debts = ({ setActiveTab }) => {
     storeConfig,
     searchTargetItem,
     setSearchTargetItem,
-    isDebtsAllowed
+    isDebtsAllowed,
+    isItemPendingDelete,
+    setItemPendingDelete
   } = useStore();
 
   const { t } = useLanguage();
-  const { notifySuccess, notifyDelete } = useToast();
+  const { notifySuccess, notifyDelete, showUndoDelete } = useToast();
 
   if (!isDebtsAllowed) {
     return (
@@ -90,14 +92,15 @@ export const Debts = ({ setActiveTab }) => {
     }
   }, [searchTargetItem, debts, setSearchTargetItem]);
 
-  // Categorize Debts
-  const activeDebts = debts.filter(d => !d.isPaid && Number(d.amount) > 0);
-  const paidDebts = debts.filter(d => d.isPaid || Number(d.amount) === 0);
+  // Categorize Debts (O'chirish jarayonida bo'lmagan faol qarzlar)
+  const visibleDebts = debts.filter(d => !isItemPendingDelete(d.id));
+  const activeDebts = visibleDebts.filter(d => !d.isPaid && Number(d.amount) > 0);
+  const paidDebts = visibleDebts.filter(d => d.isPaid || Number(d.amount) === 0);
 
   // Accurate Statistics
   const totalActiveDebtSum = activeDebts.reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
-  const totalOriginalDebtSum = debts.reduce((sum, d) => sum + (Number(d.originalAmount || d.amount) || 0), 0);
-  const totalPaidSum = debts.reduce((sum, d) => sum + (Number(d.paidAmount) || 0), 0);
+  const totalOriginalDebtSum = visibleDebts.reduce((sum, d) => sum + (Number(d.originalAmount || d.amount) || 0), 0);
+  const totalPaidSum = visibleDebts.reduce((sum, d) => sum + (Number(d.paidAmount) || 0), 0);
   const activeDebtsCount = activeDebts.length;
   const paidDebtsCount = paidDebts.length;
   const dueTodayCount = activeDebts.filter(d => d.status === 'Bugun to‘lanishi kerak').length;
@@ -112,7 +115,7 @@ export const Debts = ({ setActiveTab }) => {
   };
 
   // Name suggestions logic
-  const allNames = Array.from(new Set(debts.map(d => d.name).filter(Boolean)));
+  const allNames = Array.from(new Set(visibleDebts.map(d => d.name).filter(Boolean)));
   const suggestions = searchQuery.trim().length > 0
     ? allNames.filter(n => n.toLowerCase().includes(searchQuery.toLowerCase()) && n.toLowerCase() !== searchQuery.toLowerCase())
     : [];
@@ -122,7 +125,7 @@ export const Debts = ({ setActiveTab }) => {
     ? activeDebts
     : activeDebtTab === 'paid'
       ? paidDebts
-      : debts
+      : visibleDebts
   ).filter(d =>
     d.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     d.phone?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -172,11 +175,31 @@ export const Debts = ({ setActiveTab }) => {
   };
 
   const handleConfirmDelete = () => {
-    if (deletingDebt) {
-      deleteDebt(deletingDebt.id);
-      notifyDelete(t('debtDeletedTitle', 'Qarz o‘chirildi'), `${deletingDebt.name} nomidagi qarz yozuvi muvaffaqiyatli o‘chirildi.`);
-      setDeletingDebt(null);
-    }
+    const targetDebt = deletingDebt;
+    setDeletingDebt(null);
+    if (!targetDebt || isItemPendingDelete(targetDebt.id)) return;
+
+    // 1. Vaqtincha interfeysdan yashirish (bazaga tegilmaydi)
+    setItemPendingDelete(targetDebt.id, true);
+
+    // 2. 5 soniyalik bekor qilish bildirishnomasini ko'rsatish
+    showUndoDelete({
+      title: 'Qarz o‘chirilmoqda...',
+      seconds: 5,
+      successMessage: 'Qarz muvaffaqiyatli o‘chirildi.',
+      onUndo: () => {
+        setItemPendingDelete(targetDebt.id, false);
+      },
+      onCommit: async () => {
+        try {
+          deleteDebt(targetDebt.id);
+          setItemPendingDelete(targetDebt.id, false);
+        } catch (err) {
+          setItemPendingDelete(targetDebt.id, false);
+          throw err;
+        }
+      }
+    });
   };
 
   const openEditModal = (debtItem) => {
@@ -440,18 +463,18 @@ export const Debts = ({ setActiveTab }) => {
         </div>
 
         {/* 3 Main Views: Faol qarzlar, To'langan qarzlar, Barchasi */}
-        <div className="flex items-center space-x-2.5 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
+        <div className="flex items-center space-x-2.5 w-full sm:w-auto overflow-x-auto sm:overflow-x-visible py-1.5 px-1 scrollbar-none">
           <button
             onClick={() => setActiveDebtTab('active')}
-            className={`px-4 sm:px-5 py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            className={`btn-pill-base px-4 sm:px-5 py-2.5 rounded-2xl text-xs sm:text-sm ${
               activeDebtTab === 'active'
-                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-600/25 font-black'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                ? 'btn-pill-blue font-black'
+                : 'btn-pill-inactive'
             }`}
           >
             <span>{t('tabActiveDebts', 'Faol qarzlar')}</span>
-            <span className={`px-2 py-0.5 rounded-lg text-[11px] font-black ${
-              activeDebtTab === 'active' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+            <span className={`px-2 py-0.5 rounded-lg text-[11px] font-black transition-colors ${
+              activeDebtTab === 'active' ? 'btn-pill-badge-active' : 'btn-pill-badge-inactive'
             }`}>
               {activeDebtsCount}
             </span>
@@ -459,15 +482,15 @@ export const Debts = ({ setActiveTab }) => {
 
           <button
             onClick={() => setActiveDebtTab('paid')}
-            className={`px-4 sm:px-5 py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            className={`btn-pill-base px-4 sm:px-5 py-2.5 rounded-2xl text-xs sm:text-sm ${
               activeDebtTab === 'paid'
-                ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-600/25 font-black'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                ? 'btn-pill-emerald font-black'
+                : 'btn-pill-inactive'
             }`}
           >
             <span>{t('tabPaidDebts', 'To‘langan qarzlar')}</span>
-            <span className={`px-2 py-0.5 rounded-lg text-[11px] font-black ${
-              activeDebtTab === 'paid' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+            <span className={`px-2 py-0.5 rounded-lg text-[11px] font-black transition-colors ${
+              activeDebtTab === 'paid' ? 'btn-pill-badge-active' : 'btn-pill-badge-inactive'
             }`}>
               {paidDebtsCount}
             </span>
@@ -475,13 +498,18 @@ export const Debts = ({ setActiveTab }) => {
 
           <button
             onClick={() => setActiveDebtTab('all')}
-            className={`px-4 sm:px-5 py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap cursor-pointer ${
+            className={`btn-pill-base px-4 sm:px-5 py-2.5 rounded-2xl text-xs sm:text-sm ${
               activeDebtTab === 'all'
-                ? 'bg-slate-900 text-white shadow-md font-black'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                ? 'btn-pill-slate font-black'
+                : 'btn-pill-inactive'
             }`}
           >
-            {t('tabAllDebts', 'Barcha qarzlar')} ({debts.length})
+            <span>{t('tabAllDebts', 'Barcha qarzlar')}</span>
+            <span className={`px-2 py-0.5 rounded-lg text-[11px] font-black transition-colors ${
+              activeDebtTab === 'all' ? 'btn-pill-badge-active' : 'btn-pill-badge-inactive'
+            }`}>
+              {debts.length}
+            </span>
           </button>
         </div>
       </div>

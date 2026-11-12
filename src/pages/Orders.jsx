@@ -1,5 +1,6 @@
 // src/pages/Orders.jsx
 import React, { useState, useEffect } from 'react';
+import { ModalPortal } from '../components/ModalPortal';
 import {
   ShoppingBag,
   Plus,
@@ -29,14 +30,17 @@ export const Orders = () => {
     currentStore,
     storeConfig,
     searchTargetItem,
-    setSearchTargetItem
+    setSearchTargetItem,
+    isItemPendingDelete,
+    setItemPendingDelete
   } = useStore();
   const { t } = useLanguage();
-  const { notifyInfo, notifyDelete, notifySuccess } = useToast();
+  const { notifyInfo, notifyDelete, notifySuccess, showUndoDelete } = useToast();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('all'); // 'all' | 'Hali yo‘lda' | 'Yetkazildi'
   const [isAddOrderOpen, setIsAddOrderOpen] = useState(false);
+  const [deletingOrder, setDeletingOrder] = useState(null);
 
   useEffect(() => {
     if (searchTargetItem && searchTargetItem.type === 'order') {
@@ -47,13 +51,16 @@ export const Orders = () => {
     }
   }, [searchTargetItem, setSearchTargetItem]);
 
-  // Statistics
-  const totalOrdersCount = orders.length;
-  const onTheWayCount = orders.filter(o => o.status !== 'Yetkazildi' && o.status !== 'Bekor qilindi').length;
-  const deliveredCount = orders.filter(o => o.status === 'Yetkazildi').length;
-  const totalOrderSum = orders.reduce((sum, o) => sum + (Number(o.total) || 0), 0);
+  // Faol (o'chirish jarayonida bo'lmagan) buyurtmalar ro'yxati
+  const activeOrders = orders.filter(o => !isItemPendingDelete(o.id));
 
-  const filteredOrders = orders.filter(o => {
+  // Statistics
+  const totalOrdersCount = activeOrders.length;
+  const onTheWayCount = activeOrders.filter(o => o.status !== 'Yetkazildi' && o.status !== 'Bekor qilindi').length;
+  const deliveredCount = activeOrders.filter(o => o.status === 'Yetkazildi').length;
+  const totalOrderSum = activeOrders.reduce((sum, o) => sum + (Number(o.total) || 0), 0);
+
+  const filteredOrders = activeOrders.filter(o => {
     const customer = String(o.supplier || o.customerName || '');
     const productStr = String(o.product || (Array.isArray(o.items) ? o.items.map(i => i.name).join(', ') : '') || '');
     const idStr = String(o.id || '');
@@ -194,36 +201,51 @@ export const Orders = () => {
         </div>
 
         {/* Filter Pills */}
-        <div className="flex items-center space-x-2 w-full sm:w-auto overflow-x-auto">
+        <div className="flex items-center space-x-2 w-full sm:w-auto overflow-x-auto sm:overflow-x-visible py-1.5 px-1 scrollbar-none">
           <button
             onClick={() => setFilterStatus('all')}
-            className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
+            className={`btn-pill-base px-4 py-2.5 rounded-2xl text-xs sm:text-sm ${
               filterStatus === 'all'
-                ? 'bg-slate-900 text-white shadow-md'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                ? 'btn-pill-slate font-black'
+                : 'btn-pill-inactive'
             }`}
           >
-            {t('filterAllOrders', 'Barcha buyurtmalar')} ({orders.length})
+            <span>{t('filterAllOrders', 'Barcha buyurtmalar')}</span>
+            <span className={`px-2 py-0.5 rounded-lg text-[11px] font-black transition-colors ${
+              filterStatus === 'all' ? 'btn-pill-badge-active' : 'btn-pill-badge-inactive'
+            }`}>
+              {orders.length}
+            </span>
           </button>
           <button
             onClick={() => setFilterStatus('Hali yo‘lda')}
-            className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
+            className={`btn-pill-base px-4 py-2.5 rounded-2xl text-xs sm:text-sm ${
               filterStatus === 'Hali yo‘lda'
-                ? 'bg-amber-500 text-white shadow-md'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                ? 'btn-pill-amber font-black'
+                : 'btn-pill-inactive'
             }`}
           >
-            {t('filterOnTheWay', 'Faqat yo‘ldagilar')} ({onTheWayCount})
+            <span>{t('filterOnTheWay', 'Faqat yo‘ldagilar')}</span>
+            <span className={`px-2 py-0.5 rounded-lg text-[11px] font-black transition-colors ${
+              filterStatus === 'Hali yo‘lda' ? 'btn-pill-badge-active' : 'btn-pill-badge-inactive'
+            }`}>
+              {onTheWayCount}
+            </span>
           </button>
           <button
             onClick={() => setFilterStatus('Yetkazildi')}
-            className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
+            className={`btn-pill-base px-4 py-2.5 rounded-2xl text-xs sm:text-sm ${
               filterStatus === 'Yetkazildi'
-                ? 'bg-emerald-600 text-white shadow-md'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                ? 'btn-pill-emerald font-black'
+                : 'btn-pill-inactive'
             }`}
           >
-            {t('filterDelivered', 'Faqat yetkazilganlar')} ({deliveredCount})
+            <span>{t('filterDelivered', 'Faqat yetkazilganlar')}</span>
+            <span className={`px-2 py-0.5 rounded-lg text-[11px] font-black transition-colors ${
+              filterStatus === 'Yetkazildi' ? 'btn-pill-badge-active' : 'btn-pill-badge-inactive'
+            }`}>
+              {deliveredCount}
+            </span>
           </button>
         </div>
       </div>
@@ -323,10 +345,7 @@ export const Orders = () => {
 
                     <td className="py-4 px-6 text-right">
                       <button
-                        onClick={() => {
-                          deleteOrder(o.id);
-                          notifyDelete(t('orderDeleted', 'Buyurtma o‘chirildi'), `Buyurtma #${o.id} muvaffaqiyatli o‘chirildi.`);
-                        }}
+                        onClick={() => setDeletingOrder(o)}
                         className="p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
                         title={t('delete', 'O‘chirish')}
                       >
@@ -340,6 +359,71 @@ export const Orders = () => {
           </table>
         </div>
       </div>
+
+      {/* Delete Order Confirmation Modal */}
+      {deletingOrder && (
+        <ModalPortal>
+          <div className="fixed inset-0 z-[99999] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 font-sans select-none animate-in fade-in duration-150">
+            <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl border border-slate-100 space-y-4 text-center">
+              <div className="w-14 h-14 rounded-2xl bg-rose-50 border border-rose-100 text-rose-600 flex items-center justify-center mx-auto shadow-sm">
+                <Trash2 className="w-7 h-7" />
+              </div>
+
+              <div className="space-y-1.5">
+                <h3 className="font-extrabold text-slate-900 text-base leading-snug">
+                  {t('deleteOrderConfirmTitle', 'Buyurtmani o‘chirishni tasdiqlaysizmi?')}
+                </h3>
+                <p className="text-xs text-slate-600 font-semibold">
+                  #{deletingOrder.id} — {deletingOrder.supplier || deletingOrder.customerName || deletingOrder.product || 'Buyurtma'}
+                </p>
+              </div>
+
+              <div className="flex items-center space-x-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setDeletingOrder(null)}
+                  className="flex-1 py-3 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition-colors cursor-pointer"
+                >
+                  {t('cancel', 'Bekor qilish')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const targetOrder = deletingOrder;
+                    setDeletingOrder(null);
+                    if (!targetOrder || isItemPendingDelete(targetOrder.id)) return;
+
+                    // 1. Vaqtincha interfeysdan yashirish (bazaga tegilmaydi)
+                    setItemPendingDelete(targetOrder.id, true);
+
+                    // 2. 5 soniyalik bekor qilish bildirishnomasini ko'rsatish
+                    showUndoDelete({
+                      title: 'Buyurtma o‘chirilmoqda...',
+                      seconds: 5,
+                      successMessage: 'Buyurtma muvaffaqiyatli o‘chirildi.',
+                      onUndo: () => {
+                        setItemPendingDelete(targetOrder.id, false);
+                      },
+                      onCommit: async () => {
+                        try {
+                          deleteOrder(targetOrder.id);
+                          setItemPendingDelete(targetOrder.id, false);
+                        } catch (err) {
+                          setItemPendingDelete(targetOrder.id, false);
+                          throw err;
+                        }
+                      }
+                    });
+                  }}
+                  className="flex-1 py-3 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-lg shadow-rose-600/25 transition-all cursor-pointer"
+                >
+                  {t('delete', 'O‘chirish')}
+                </button>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
 
       {/* Add Order Modal */}
       <QuickActionModal

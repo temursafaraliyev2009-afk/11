@@ -16,19 +16,27 @@ import {
 } from 'lucide-react';
 import {
   ResponsiveContainer,
-  AreaChart,
-  Area,
+  BarChart,
+  Bar,
   XAxis,
   YAxis,
   Tooltip,
+  CartesianGrid,
   PieChart,
   Pie,
   Cell
 } from 'recharts';
 import { useStore } from '../context/StoreContext';
 import { useLanguage } from '../context/LanguageContext';
-import { getLocalDateString, getOffsetDateString } from '../utils/dateUtils';
-import { isReturnedSale, isDebtCollectionSale, aggregateSalesFinancials } from '../utils/financeUtils.js';
+import { getLocalDateString, getOffsetDateString, getPreviousYearLikeForLikeRange } from '../utils/dateUtils';
+import {
+  isReturnedSale,
+  isDebtCollectionSale,
+  aggregateSalesFinancials,
+  formatChartAxisNumber,
+  computeChartDomain,
+  calculateGrowthMetrics
+} from '../utils/financeUtils.js';
 
 export const Sales = () => {
   const { storeConfig, employees, currentStore, sales = [], products = [] } = useStore();
@@ -57,20 +65,15 @@ export const Sales = () => {
   const filterSalesByPeriod = (period) => {
     const now = new Date();
     const todayStr = getLocalDateString(now);
-    const currentHour = now.getHours();
 
     const isValidSale = (s) => {
       if (!s || isReturnedSale(s) || isDebtCollectionSale(s)) return false;
       const sDate = s.date || todayStr;
       if (sDate > todayStr) return false;
-      if (sDate === todayStr && s.time) {
-        const h = parseInt(s.time.split(':')[0], 10);
-        if (!isNaN(h) && h > currentHour) return false;
-      }
       return true;
     };
 
-    switch(period) {
+    switch (period) {
       case 'Bugun':
         return sales.filter(s => isValidSale(s) && (s.date === todayStr || !s.date));
       case 'Kecha': {
@@ -78,7 +81,7 @@ export const Sales = () => {
         return sales.filter(s => isValidSale(s) && s.date === y);
       }
       case 'Oxirgi 7 kun': {
-        const d7 = getOffsetDateString(-7, now);
+        const d7 = getOffsetDateString(-6, now);
         return sales.filter(s => {
           if (!isValidSale(s)) return false;
           const sDate = s.date || todayStr;
@@ -86,7 +89,7 @@ export const Sales = () => {
         });
       }
       case 'Oxirgi 30 kun': {
-        const d30 = getOffsetDateString(-30, now);
+        const d30 = getOffsetDateString(-29, now);
         return sales.filter(s => {
           if (!isValidSale(s)) return false;
           const sDate = s.date || todayStr;
@@ -94,7 +97,8 @@ export const Sales = () => {
         });
       }
       case 'Yil': {
-        const yearStart = now.getFullYear() + '-01-01';
+        const currentYear = todayStr.substring(0, 4);
+        const yearStart = `${currentYear}-01-01`;
         return sales.filter(s => {
           if (!isValidSale(s)) return false;
           const sDate = s.date || todayStr;
@@ -110,16 +114,11 @@ export const Sales = () => {
   const periodDataMap = useMemo(() => {
     const now = new Date();
     const todayStr = getLocalDateString(now);
-    const currentHour = now.getHours();
 
     const isValidMerchandise = (s) => {
       if (!s || isReturnedSale(s) || isDebtCollectionSale(s)) return false;
       const sDate = s.date || todayStr;
       if (sDate > todayStr) return false;
-      if (sDate === todayStr && s.time) {
-        const h = parseInt(s.time.split(':')[0], 10);
-        if (!isNaN(h) && h > currentHour) return false;
-      }
       return true;
     };
 
@@ -127,10 +126,6 @@ export const Sales = () => {
       if (!s || isReturnedSale(s)) return false;
       const sDate = s.date || todayStr;
       if (sDate > todayStr) return false;
-      if (sDate === todayStr && s.time) {
-        const h = parseInt(s.time.split(':')[0], 10);
-        if (!isNaN(h) && h > currentHour) return false;
-      }
       return true;
     };
 
@@ -155,8 +150,8 @@ export const Sales = () => {
         };
       }
       if (p === 'Oxirgi 7 kun') {
-        const d7 = getOffsetDateString(-7, now);
-        const d14 = getOffsetDateString(-14, now);
+        const d7 = getOffsetDateString(-6, now);
+        const d14 = getOffsetDateString(-13, now);
         return {
           current: (s) => isValidMerchandise(s) && (s.date || todayStr) >= d7 && (s.date || todayStr) <= todayStr,
           previous: (s) => isValidMerchandise(s) && (s.date || todayStr) >= d14 && (s.date || todayStr) < d7,
@@ -165,8 +160,8 @@ export const Sales = () => {
         };
       }
       if (p === 'Oxirgi 30 kun') {
-        const d30 = getOffsetDateString(-30, now);
-        const d60 = getOffsetDateString(-60, now);
+        const d30 = getOffsetDateString(-29, now);
+        const d60 = getOffsetDateString(-59, now);
         return {
           current: (s) => isValidMerchandise(s) && (s.date || todayStr) >= d30 && (s.date || todayStr) <= todayStr,
           previous: (s) => isValidMerchandise(s) && (s.date || todayStr) >= d60 && (s.date || todayStr) < d30,
@@ -174,12 +169,13 @@ export const Sales = () => {
           label: t('comparisonVsPreviousMonth', 'oldingi 30 kunga nisbatan')
         };
       }
-      // Yil
-      const yStart = now.getFullYear() + '-01-01';
-      const prevYStart = (now.getFullYear() - 1) + '-01-01';
+      // Yil (like-for-like Year-to-Date)
+      const currentYear = todayStr.substring(0, 4);
+      const yStart = `${currentYear}-01-01`;
+      const { prevYearStartStr, prevYearLikeEndStr } = getPreviousYearLikeForLikeRange(now);
       return {
         current: (s) => isValidMerchandise(s) && (s.date || todayStr) >= yStart && (s.date || todayStr) <= todayStr,
-        previous: (s) => isValidMerchandise(s) && (s.date || todayStr) >= prevYStart && (s.date || todayStr) < yStart,
+        previous: (s) => isValidMerchandise(s) && (s.date || todayStr) >= prevYearStartStr && (s.date || todayStr) <= prevYearLikeEndStr,
         currentAll: (s) => isValidTransaction(s) && (s.date || todayStr) >= yStart && (s.date || todayStr) <= todayStr,
         label: t('comparisonVsPreviousYear', 'o‘tgan yilga nisbatan')
       };
@@ -193,19 +189,19 @@ export const Sales = () => {
       const totalSales = filtered.reduce((sum, s) => sum + (Number(s.total) || 0), 0);
       const prevTotalSales = prevFiltered.reduce((sum, s) => sum + (Number(s.total) || 0), 0);
       const diffSales = totalSales - prevTotalSales;
-      const growthPct = prevTotalSales > 0 ? (((totalSales - prevTotalSales) / prevTotalSales) * 100).toFixed(1) : (totalSales > 0 ? '+100' : '0');
+      const salesGrowth = calculateGrowthMetrics(totalSales, prevTotalSales);
 
       const itemsSold = filtered.reduce((sum, s) => sum + (Number(s.qty) || 1), 0);
       const prevItemsSold = prevFiltered.reduce((sum, s) => sum + (Number(s.qty) || 1), 0);
-      const itemsGrowthPct = prevItemsSold > 0 ? (((itemsSold - prevItemsSold) / prevItemsSold) * 100).toFixed(1) : (itemsSold > 0 ? '+100' : '0');
+      const itemsGrowth = calculateGrowthMetrics(itemsSold, prevItemsSold);
 
       const salesCount = filtered.length;
       const prevSalesCount = prevFiltered.length;
-      const salesCountGrowthPct = prevSalesCount > 0 ? (((salesCount - prevSalesCount) / prevSalesCount) * 100).toFixed(1) : (salesCount > 0 ? '+100' : '0');
+      const salesCountGrowth = calculateGrowthMetrics(salesCount, prevSalesCount);
 
       const averageCheck = salesCount > 0 ? Math.round(totalSales / salesCount) : 0;
       const prevAvgCheck = prevSalesCount > 0 ? Math.round(prevTotalSales / prevSalesCount) : 0;
-      const avgCheckGrowthPct = prevAvgCheck > 0 ? (((averageCheck - prevAvgCheck) / prevAvgCheck) * 100).toFixed(1) : (averageCheck > 0 ? '+100' : '0');
+      const avgCheckGrowth = calculateGrowthMetrics(averageCheck, prevAvgCheck);
 
       // Kassa kirimi (Haqiqatda qabul qilingan Naqd va Karta to'lovlari)
       const periodCashFin = aggregateSalesFinancials(sales.filter(cfg.currentAll), products, todayStr);
@@ -218,14 +214,18 @@ export const Sales = () => {
         totalSales,
         previousSales: prevTotalSales,
         diffSales,
-        diffPct: Math.abs(Number(growthPct)),
-        growthPct,
+        diffPct: Math.abs(salesGrowth.rate ?? 0),
+        growthPct: salesGrowth.badgeText,
+        salesGrowth,
         itemsSold,
-        itemsGrowthPct,
+        itemsGrowthPct: itemsGrowth.badgeText,
+        itemsGrowth,
         salesCount,
-        salesCountGrowthPct,
+        salesCountGrowthPct: salesCountGrowth.badgeText,
+        salesCountGrowth,
         averageCheck,
-        avgCheckGrowthPct,
+        avgCheckGrowthPct: avgCheckGrowth.badgeText,
+        avgCheckGrowth,
         cashSales,
         cashPct,
         cardSales,
@@ -248,83 +248,132 @@ export const Sales = () => {
 
   const currentStats = periodDataMap[selectedPeriod] || periodDataMap['Bugun'];
 
-  // Dynamic Sales trend chart data from real sales
+  // Dynamic Sales trend chart data from real sales (BarChart columns)
   const chartData = useMemo(() => {
     const now = new Date();
     const todayStr = getLocalDateString(now);
-    const currentHour = now.getHours();
 
     const filtered = filterSalesByPeriod(selectedPeriod);
-    if (filtered.length === 0) {
-      return [{ day: '-', date: 'Ma\'lumot yo\'q', amount: 0 }];
-    }
 
-    // Group by appropriate time unit
-    if (selectedPeriod === 'Bugun' || selectedPeriod === 'Kecha') {
-      // Group by hour
+    // 1. Bugun
+    if (selectedPeriod === 'Bugun') {
+      if (filtered.length === 0) return [];
       const hourMap = {};
       filtered.forEach(s => {
         const hNum = parseInt((s.time || '12:00').split(':')[0], 10);
-        if (selectedPeriod === 'Bugun' && hNum > currentHour) {
-          return;
-        }
-        const h = String(hNum).padStart(2, '0') + ':00';
-        if (!hourMap[h]) hourMap[h] = 0;
-        hourMap[h] += Number(s.total) || 0;
+        const h = isNaN(hNum) ? '12:00' : String(hNum).padStart(2, '0') + ':00';
+        hourMap[h] = (hourMap[h] || 0) + (Number(s.total) || 0);
       });
       const sorted = Object.entries(hourMap).sort((a, b) => a[0].localeCompare(b[0]));
-      if (sorted.length === 0) {
-        return [{ day: '-', date: 'Ma\'lumot yo\'q', amount: 0 }];
-      }
       return sorted.map(([hour, amount]) => ({
         day: hour,
-        date: selectedPeriod + ', ' + hour,
+        date: `Bugun, ${hour}`,
         amount
       }));
     }
 
-    // Group by date for longer periods
-    const dateMap = {};
-    filtered.forEach(s => {
-      const d = s.date || todayStr;
-      if (d > todayStr) return;
-      if (!dateMap[d]) dateMap[d] = 0;
-      dateMap[d] += Number(s.total) || 0;
-    });
-    const sorted = Object.entries(dateMap).sort((a, b) => a[0].localeCompare(b[0]));
-    if (sorted.length === 0) {
-      return [{ day: '-', date: 'Ma\'lumot yo\'q', amount: 0 }];
+    // 2. Kecha
+    if (selectedPeriod === 'Kecha') {
+      if (filtered.length === 0) return [];
+      const hourMap = {};
+      filtered.forEach(s => {
+        const hNum = parseInt((s.time || '12:00').split(':')[0], 10);
+        const h = String(hNum).padStart(2, '0') + ':00';
+        hourMap[h] = (hourMap[h] || 0) + (Number(s.total) || 0);
+      });
+      const sorted = Object.entries(hourMap).sort((a, b) => a[0].localeCompare(b[0]));
+      return sorted.map(([hour, amount]) => ({
+        day: hour,
+        date: `Kecha, ${hour}`,
+        amount
+      }));
     }
 
-    // Format labels
-    return sorted.map(([date, amount]) => {
-      const parts = date.split('-');
-      const label = parts.length === 3 ? parts[2] + '.' + parts[1] : date;
-      return { day: label, date, amount };
-    });
+    // 3. Oxirgi 7 kun: Har bir kun uchun ustun (bo'sh kunlarda 0)
+    if (selectedPeriod === 'Oxirgi 7 kun') {
+      const days = [];
+      const daySalesMap = {};
+      filtered.forEach(s => {
+        const d = s.date || todayStr;
+        daySalesMap[d] = (daySalesMap[d] || 0) + (Number(s.total) || 0);
+      });
+
+      for (let i = 6; i >= 0; i--) {
+        const dStr = getOffsetDateString(-i, now);
+        const parts = dStr.split('-');
+        const label = parts.length === 3 ? `${parts[2]}.${parts[1]}` : dStr;
+        days.push({
+          day: label,
+          date: dStr,
+          amount: daySalesMap[dStr] || 0
+        });
+      }
+      return days;
+    }
+
+    // 4. Oxirgi 30 kun: Har bir kun uchun ustun
+    if (selectedPeriod === 'Oxirgi 30 kun') {
+      const days = [];
+      const daySalesMap = {};
+      filtered.forEach(s => {
+        const d = s.date || todayStr;
+        daySalesMap[d] = (daySalesMap[d] || 0) + (Number(s.total) || 0);
+      });
+
+      for (let i = 29; i >= 0; i--) {
+        const dStr = getOffsetDateString(-i, now);
+        const parts = dStr.split('-');
+        const label = parts.length === 3 ? `${parts[2]}.${parts[1]}` : dStr;
+        days.push({
+          day: label,
+          date: dStr,
+          amount: daySalesMap[dStr] || 0
+        });
+      }
+      return days;
+    }
+
+    // 5. Yil: 12 oy bo'yicha guruhlangan ustunlar
+    if (selectedPeriod === 'Yil') {
+      const monthNames = ['Yan', 'Fev', 'Mar', 'Apr', 'May', 'Iyun', 'Iyul', 'Avg', 'Sen', 'Okt', 'Noy', 'Dek'];
+      const currentYear = todayStr.substring(0, 4);
+      const currentMonthIndex = parseInt(todayStr.substring(5, 7), 10) - 1;
+
+      const monthSalesMap = {};
+      filtered.forEach(s => {
+        const d = s.date || todayStr;
+        if (d.startsWith(currentYear)) {
+          const mIndex = parseInt(d.substring(5, 7), 10) - 1;
+          monthSalesMap[mIndex] = (monthSalesMap[mIndex] || 0) + (Number(s.total) || 0);
+        }
+      });
+
+      return monthNames.map((name, idx) => ({
+        day: name,
+        date: `${name} ${currentYear}`,
+        amount: idx <= currentMonthIndex ? (monthSalesMap[idx] || 0) : 0
+      }));
+    }
+
+    return [];
   }, [selectedPeriod, sales]);
 
-  const chartMax = useMemo(() => {
-    const maxVal = Math.max(...chartData.map(d => d.amount), 1000);
-    return Math.ceil(maxVal * 1.15);
+  const chartDomain = useMemo(() => {
+    return computeChartDomain(chartData, ['amount'], 100000);
   }, [chartData]);
 
-  const chartTicks = useMemo(() => {
-    const step = chartMax / 4;
-    return [0, Math.round(step), Math.round(step * 2), Math.round(step * 3), Math.round(chartMax)];
-  }, [chartMax]);
-
-  const formatYAxis = (val) => {
-    if (val >= 1000000) return `${(val / 1000000).toFixed(1).replace('.0', '')}M`;
-    if (val >= 1000) return `${val / 1000}k`;
-    return val;
-  };
+  const formatYAxis = formatChartAxisNumber;
 
   // Payment Breakdown
-  const paymentPieData = [
-    { name: t('kpiCash', 'Naqd'), value: currentStats.cashSales, color: '#10B981' },
-    { name: t('kpiCard', 'Karta'), value: currentStats.cardSales, color: '#3B82F6' },
-  ];
+  const paymentPieData = useMemo(() => {
+    if (currentStats.cashSales === 0 && currentStats.cardSales === 0) {
+      return [{ name: t('noData', 'Ma\'lumot yo\'q'), value: 1, color: '#E2E8F0', isPlaceholder: true }];
+    }
+    return [
+      { name: t('kpiCash', 'Naqd'), value: currentStats.cashSales, color: '#10B981' },
+      { name: t('kpiCard', 'Karta'), value: currentStats.cardSales, color: '#3B82F6' },
+    ];
+  }, [currentStats.cashSales, currentStats.cardSales, t]);
 
   // Top Products from real sales data
   const topProductsList = useMemo(() => {
@@ -390,18 +439,17 @@ export const Sales = () => {
         </div>
 
         {/* Period Selector Pills */}
-        <div className="flex items-center space-x-1.5 p-1.5 bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-x-auto">
+        <div className="flex items-center space-x-1.5 p-1.5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs overflow-x-auto sm:overflow-x-visible scrollbar-none">
           {periods.map((p) => {
             const isSelected = selectedPeriod === p.key;
             return (
               <button
                 key={p.key}
                 onClick={() => setSelectedPeriod(p.key)}
-                className={`px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap cursor-pointer ${
-                  isSelected
-                    ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-600/25 font-black'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                }`}
+                className={`btn-pill-base px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm ${isSelected
+                    ? 'btn-pill-blue font-black'
+                    : 'btn-pill-inactive'
+                  }`}
               >
                 {t(p.labelKey, p.fallback)}
               </button>
@@ -426,8 +474,10 @@ export const Sales = () => {
             <div className="text-base sm:text-lg font-black text-slate-900 tracking-tight">
               {currentStats.totalSales.toLocaleString()} <span className="text-xs font-bold text-slate-400">{t('sum', 'so‘m')}</span>
             </div>
-            <div className="text-[11px] font-bold text-emerald-600 flex items-center gap-1 mt-1">
-              <span>{Number(currentStats.growthPct) >= 0 ? '↑' : '↓'} {Math.abs(Number(currentStats.growthPct))}%</span>
+            <div className={`text-[11px] font-bold flex items-center gap-1 mt-1 ${
+              currentStats.salesGrowth?.isNegative ? 'text-rose-600' : currentStats.salesGrowth?.isZero ? 'text-slate-400' : 'text-emerald-600'
+            }`}>
+              <span>{currentStats.salesGrowth ? currentStats.salesGrowth.badgeText : currentStats.growthPct}</span>
               <span className="text-[10px] text-slate-400 font-medium truncate">{currentStats.comparisonSubtext}</span>
             </div>
           </div>
@@ -447,8 +497,10 @@ export const Sales = () => {
             <div className="text-base sm:text-lg font-black text-slate-900 tracking-tight">
               {currentStats.itemsSold} <span className="text-xs font-bold text-slate-400">{t('itemsUnit', 'ta')}</span>
             </div>
-            <div className="text-[11px] font-bold text-emerald-600 flex items-center gap-1 mt-1">
-              <span>{Number(currentStats.itemsGrowthPct) >= 0 ? '↑' : '↓'} {Math.abs(Number(currentStats.itemsGrowthPct))}%</span>
+            <div className={`text-[11px] font-bold flex items-center gap-1 mt-1 ${
+              currentStats.itemsGrowth?.isNegative ? 'text-rose-600' : currentStats.itemsGrowth?.isZero ? 'text-slate-400' : 'text-emerald-600'
+            }`}>
+              <span>{currentStats.itemsGrowth ? currentStats.itemsGrowth.badgeText : currentStats.itemsGrowthPct}</span>
               <span className="text-[10px] text-slate-400 font-medium truncate">{currentStats.comparisonSubtext}</span>
             </div>
           </div>
@@ -468,8 +520,10 @@ export const Sales = () => {
             <div className="text-base sm:text-lg font-black text-slate-900 tracking-tight">
               {currentStats.salesCount} <span className="text-xs font-bold text-slate-400">{t('itemsUnit', 'ta')}</span>
             </div>
-            <div className="text-[11px] font-bold text-emerald-600 flex items-center gap-1 mt-1">
-              <span>{Number(currentStats.salesCountGrowthPct) >= 0 ? '↑' : '↓'} {Math.abs(Number(currentStats.salesCountGrowthPct))}%</span>
+            <div className={`text-[11px] font-bold flex items-center gap-1 mt-1 ${
+              currentStats.salesCountGrowth?.isNegative ? 'text-rose-600' : currentStats.salesCountGrowth?.isZero ? 'text-slate-400' : 'text-emerald-600'
+            }`}>
+              <span>{currentStats.salesCountGrowth ? currentStats.salesCountGrowth.badgeText : currentStats.salesCountGrowthPct}</span>
               <span className="text-[10px] text-slate-400 font-medium truncate">{currentStats.comparisonSubtext}</span>
             </div>
           </div>
@@ -489,8 +543,10 @@ export const Sales = () => {
             <div className="text-base sm:text-lg font-black text-slate-900 tracking-tight">
               {currentStats.averageCheck.toLocaleString()} <span className="text-xs font-bold text-slate-400">{t('sum', 'so‘m')}</span>
             </div>
-            <div className="text-[11px] font-bold text-emerald-600 flex items-center gap-1 mt-1">
-              <span>{Number(currentStats.avgCheckGrowthPct) >= 0 ? '↑' : '↓'} {Math.abs(Number(currentStats.avgCheckGrowthPct))}%</span>
+            <div className={`text-[11px] font-bold flex items-center gap-1 mt-1 ${
+              currentStats.avgCheckGrowth?.isNegative ? 'text-rose-600' : currentStats.avgCheckGrowth?.isZero ? 'text-slate-400' : 'text-emerald-600'
+            }`}>
+              <span>{currentStats.avgCheckGrowth ? currentStats.avgCheckGrowth.badgeText : currentStats.avgCheckGrowthPct}</span>
               <span className="text-[10px] text-slate-400 font-medium truncate">{currentStats.comparisonSubtext}</span>
             </div>
           </div>
@@ -556,57 +612,58 @@ export const Sales = () => {
           </div>
 
           <div className="h-[290px] w-full pt-2">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData} margin={{ top: 20, right: 20, left: -10, bottom: 10 }}>
-                <defs>
-                  <linearGradient id="salesLineGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.25} />
-                    <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.0} />
-                  </linearGradient>
-                </defs>
-                <XAxis
-                  dataKey="day"
-                  axisLine={{ stroke: '#F1F5F9' }}
-                  tickLine={false}
-                  tick={{ fill: '#94A3B8', fontSize: 11, fontWeight: 700 }}
-                />
-                <YAxis
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{ fill: '#94A3B8', fontSize: 10, fontWeight: 600 }}
-                  tickFormatter={formatYAxis}
-                  domain={[0, chartMax]}
-                  ticks={chartTicks}
-                />
-                <Tooltip
-                  content={({ active, payload }) => {
-                    if (active && payload && payload.length) {
-                      return (
-                        <div className="bg-white p-3 rounded-2xl shadow-xl border border-slate-100 text-center font-sans">
-                          <div className="text-[10px] text-slate-400 font-extrabold">
-                            {payload[0].payload.day} ({payload[0].payload.date})
+            {chartData.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-slate-400 space-y-2">
+                <div className="w-10 h-10 rounded-2xl bg-slate-50 flex items-center justify-center text-slate-300">
+                  <LineChartIcon className="w-5 h-5" />
+                </div>
+                <span className="text-xs font-bold">{t('noSalesPeriod', 'Tanlangan davr uchun savdo ma’lumotlari mavjud emas')}</span>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={chartData} margin={{ top: 20, right: 20, left: -10, bottom: 10 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
+                  <XAxis
+                    dataKey="day"
+                    axisLine={{ stroke: '#F1F5F9' }}
+                    tickLine={false}
+                    tick={{ fill: '#94A3B8', fontSize: 11, fontWeight: 700 }}
+                  />
+                  <YAxis
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fill: '#94A3B8', fontSize: 10, fontWeight: 600 }}
+                    tickFormatter={formatYAxis}
+                    domain={chartDomain}
+                  />
+                  <Tooltip
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        return (
+                          <div className="bg-white p-3 rounded-2xl shadow-xl border border-slate-100 text-center font-sans">
+                            <div className="text-[10px] text-slate-400 font-extrabold">
+                              {payload[0].payload.day} ({payload[0].payload.date})
+                            </div>
+                            <div className="text-xs sm:text-sm font-black text-blue-600 mt-0.5">
+                              {Number(payload[0].value || 0).toLocaleString('uz-UZ')} {t('sum', 'so‘m')}
+                            </div>
                           </div>
-                          <div className="text-xs sm:text-sm font-black text-blue-600 mt-0.5">
-                            {payload[0].value.toLocaleString()} {t('sum', 'so‘m')}
-                          </div>
-                        </div>
-                      );
-                    }
-                    return null;
-                  }}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="amount"
-                  stroke="#3B82F6"
-                  strokeWidth={3}
-                  fillOpacity={1}
-                  fill="url(#salesLineGrad)"
-                  dot={{ r: 4, fill: '#3B82F6', stroke: '#FFFFFF', strokeWidth: 2 }}
-                  activeDot={{ r: 6, fill: '#2563EB', stroke: '#FFFFFF', strokeWidth: 3 }}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+                  <Bar
+                    dataKey="amount"
+                    name={t('salesDynamics', 'Savdo')}
+                    fill="#3B82F6"
+                    radius={[6, 6, 0, 0]}
+                    maxBarSize={36}
+                    minPointSize={2}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
 
@@ -640,15 +697,19 @@ export const Sales = () => {
 
               <div>
                 <div className="text-[11px] font-semibold text-slate-400">{t('differenceLabel', 'Farq')}</div>
-                <div className="text-xs sm:text-sm font-black text-emerald-600 mt-0.5">
-                  {currentStats.diffSales >= 0 ? '+ ' : ''}{currentStats.diffSales.toLocaleString()} {t('sum', 'so‘m')}
+                <div className={`text-xs sm:text-sm font-black mt-0.5 ${
+                  currentStats.diffSales < 0 ? 'text-rose-600' : currentStats.diffSales === 0 ? 'text-slate-500' : 'text-emerald-600'
+                }`}>
+                  {currentStats.diffSales > 0 ? '+ ' : ''}{currentStats.diffSales.toLocaleString()} {t('sum', 'so‘m')}
                 </div>
               </div>
 
               <div>
                 <div className="text-[11px] font-semibold text-slate-400">{t('changePctLabel', 'O‘zgarish')}</div>
-                <div className="text-xs sm:text-sm font-black text-emerald-600 mt-0.5 flex items-center gap-1">
-                  <span>{currentStats.diffSales >= 0 ? '↑' : '↓'} {currentStats.diffPct}%</span>
+                <div className={`text-xs sm:text-sm font-black mt-0.5 flex items-center gap-1 ${
+                  currentStats.diffSales < 0 ? 'text-rose-600' : currentStats.diffSales === 0 ? 'text-slate-500' : 'text-emerald-600'
+                }`}>
+                  <span>{currentStats.salesGrowth ? currentStats.salesGrowth.badgeText : currentStats.growthPct}</span>
                 </div>
               </div>
             </div>

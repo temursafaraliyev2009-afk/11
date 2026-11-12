@@ -9,11 +9,18 @@ import {
   YAxis,
   Tooltip,
   CartesianGrid,
-  Cell
+  Cell,
+  ReferenceLine
 } from 'recharts';
 import { useStore } from '../context/StoreContext';
 import { getLocalDateString } from '../utils/dateUtils';
-import { aggregateSalesFinancials, isReturnedSale, isDebtCollectionSale } from '../utils/financeUtils.js';
+import {
+  aggregateSalesFinancials,
+  isReturnedSale,
+  isDebtCollectionSale,
+  formatChartAxisNumber,
+  computeChartDomain
+} from '../utils/financeUtils.js';
 
 export const ReportsPage = () => {
   const { sales = [], products = [], currentStore, isEmployee } = useStore();
@@ -21,9 +28,8 @@ export const ReportsPage = () => {
 
   const now = new Date();
   const todayStr = getLocalDateString(now);
-  const currentHour = now.getHours();
   const currentYear = todayStr.substring(0, 4);
-  const currentMonthNum = now.getMonth() + 1; // 1-12
+  const currentMonthNum = parseInt(todayStr.substring(5, 7), 10); // 1-12 Asia/Tashkent
 
   // Valid non-future merchandise sales excluding returns and debt collections
   const validSales = useMemo(() => {
@@ -31,13 +37,9 @@ export const ReportsPage = () => {
       if (!s) return false;
       const sDate = s.date || todayStr;
       if (sDate > todayStr) return false;
-      if (sDate === todayStr && s.time) {
-        const h = parseInt(s.time.split(':')[0], 10);
-        if (!isNaN(h) && h > currentHour) return false;
-      }
       return !isReturnedSale(s) && !isDebtCollectionSale(s);
     });
-  }, [sales, todayStr, currentHour]);
+  }, [sales, todayStr]);
 
   // Year sales
   const yearSales = useMemo(() => {
@@ -50,6 +52,7 @@ export const ReportsPage = () => {
     return monthLabels.map((month, i) => {
       const mIdx = i + 1;
       let monthRev = 0;
+      let monthCost = 0;
       let monthProfit = 0;
       let isLoss = false;
 
@@ -58,17 +61,23 @@ export const ReportsPage = () => {
         const mSales = yearSales.filter(s => (s.date || todayStr).substring(5, 7) === mStr);
         const mFin = aggregateSalesFinancials(mSales, products, todayStr);
         monthRev = mFin.revenue;
+        monthCost = mFin.cost;
         monthProfit = mFin.profit;
         isLoss = mFin.isLoss;
       }
       return {
         month,
         sales: monthRev,
+        cost: monthCost,
         profit: monthProfit,
         isLoss
       };
     });
   }, [yearSales, currentMonthNum, todayStr, products]);
+
+  const chartDomain = useMemo(() => {
+    return computeChartDomain(monthlyData, ['sales', 'cost', 'profit'], 100000);
+  }, [monthlyData]);
 
   // Current month stats
   const curMonthStr = String(currentMonthNum).padStart(2, '0');
@@ -145,20 +154,79 @@ export const ReportsPage = () => {
       </div>
 
       <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
-        <h3 className="text-xs font-black uppercase tracking-wider text-slate-800">
-          {currentYear} {t('yearDynamics', 'YIL DINAMIKASI')}
-        </h3>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <h3 className="text-xs font-black uppercase tracking-wider text-slate-800">
+            {currentYear} {t('yearDynamics', 'YIL DINAMIKASI')}
+          </h3>
+          <div className="flex flex-wrap items-center gap-3 text-xs font-bold">
+            <div className="flex items-center space-x-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
+              <span className="text-slate-600">{t('revenueTitle', 'Tushum')}</span>
+            </div>
+            <div className="flex items-center space-x-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+              <span className="text-slate-600">{t('totalExpensesTitle', 'Xarajat')}</span>
+            </div>
+            <div className="flex items-center space-x-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+              <span className="text-slate-600">{t('grossProfitTitle', 'Yalpi Foyda')}</span>
+            </div>
+          </div>
+        </div>
         <div className="h-64 w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={monthlyData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
+            <BarChart
+              data={monthlyData}
+              margin={{ top: 10, right: 10, left: -10, bottom: 0 }}
+              barGap={4}
+              barCategoryGap="20%"
+            >
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
               <XAxis dataKey="month" stroke="#94A3B8" fontSize={11} axisLine={false} tickLine={false} />
-              <YAxis stroke="#94A3B8" fontSize={10} axisLine={false} tickLine={false} tickFormatter={(val) => `${val / 1000000}M`} />
-              <Tooltip formatter={(val, name) => [`${val.toLocaleString()} ${t('sum', "so'm")}`, name]} />
-              <Bar dataKey="sales" name={t('revenueTitle', 'Tushum')} fill="#3B82F6" radius={[8, 8, 0, 0]} />
-              <Bar dataKey="profit" name={t('grossProfitTitle', 'Yalpi Foyda')} radius={[8, 8, 0, 0]}>
+              <YAxis
+                stroke="#94A3B8"
+                fontSize={10}
+                axisLine={false}
+                tickLine={false}
+                domain={chartDomain}
+                tickFormatter={formatChartAxisNumber}
+              />
+              <ReferenceLine y={0} stroke="#CBD5E1" strokeWidth={1.5} />
+              <Tooltip
+                content={({ active, payload }) => {
+                  if (active && payload && payload.length) {
+                    const item = payload[0].payload;
+                    const isLoss = item.profit < 0;
+                    return (
+                      <div className="bg-white p-3 rounded-2xl shadow-xl border border-slate-100 text-xs font-bold space-y-1 font-sans min-w-[170px]">
+                        <div className="text-slate-400 text-[10px] uppercase font-black">{item.month} {currentYear}</div>
+                        <div className="text-blue-600 flex items-center justify-between gap-3">
+                          <span>{t('revenueTitle', 'Tushum')}:</span>
+                          <span>{Number(item.sales || 0).toLocaleString('uz-UZ')} {t('sum', "so'm")}</span>
+                        </div>
+                        <div className="text-amber-600 flex items-center justify-between gap-3">
+                          <span>{t('totalExpensesTitle', 'Xarajat')}:</span>
+                          <span>{Number(item.cost || 0).toLocaleString('uz-UZ')} {t('sum', "so'm")}</span>
+                        </div>
+                        <div className={`${isLoss ? 'text-rose-600 font-black' : 'text-emerald-600 font-black'} flex items-center justify-between gap-3 pt-1 border-t border-slate-100`}>
+                          <span>{isLoss ? t('grossLossTitle', 'Yalpi Zarar') : t('grossProfitTitle', 'Yalpi Foyda')}:</span>
+                          <span>{isLoss ? `-${Math.abs(item.profit).toLocaleString('uz-UZ')}` : Number(item.profit || 0).toLocaleString('uz-UZ')} {t('sum', "so'm")}</span>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return null;
+                }}
+              />
+              <Bar dataKey="sales" name={t('revenueTitle', 'Tushum')} fill="#3B82F6" radius={[6, 6, 0, 0]} maxBarSize={28} minPointSize={3} />
+              <Bar dataKey="cost" name={t('totalExpensesTitle', 'Xarajat')} fill="#F59E0B" radius={[6, 6, 0, 0]} maxBarSize={28} minPointSize={3} />
+              <Bar dataKey="profit" name={t('grossProfitTitle', 'Yalpi Foyda')} maxBarSize={28} minPointSize={3}>
                 {monthlyData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.isLoss ? '#EF4444' : '#10B981'} />
+                  <Cell
+                    key={`cell-${index}`}
+                    fill={entry.isLoss ? '#EF4444' : '#10B981'}
+                    radius={entry.isLoss ? [0, 0, 6, 6] : [6, 6, 0, 0]}
+                  />
                 ))}
               </Bar>
             </BarChart>

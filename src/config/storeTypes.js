@@ -140,11 +140,11 @@ export const STORE_TYPES = [
       { key: 'stock', label: 'Miqdor', type: 'number', required: true, placeholder: '15' },
     ],
     sampleProducts: [
-      { id: 'p1', emoji: '👕', name: 'Erkaklar polo futbolkasi (L)', category: 'Erkaklar kiyimi', unit: 'dona', stock: 15, price: 180000, costPrice: 120000, status: 'Yetarli' },
-      { id: 'p2', emoji: '👖', name: 'Erkaklar jinsi shimi (32)', category: 'Erkaklar kiyimi', unit: 'dona', stock: 3, price: 320000, costPrice: 220000, status: 'Kam' },
-      { id: 'p3', emoji: '🧥', name: 'Qishki kurtka Zara (XL)', category: 'Ustki kiyimlar', unit: 'dona', stock: 1, price: 850000, costPrice: 600000, status: 'Tugagan' },
-      { id: 'p4', emoji: '👟', name: 'Nike Air Force 1 (42)', category: 'Oyoq kiyimlar', unit: 'juft', stock: 8, price: 650000, costPrice: 450000, status: 'Yetarli' },
-      { id: 'p5', emoji: '👗', name: 'Ayollar kechki ko‘ylagi (M)', category: 'Ayollar kiyimi', unit: 'dona', stock: 5, price: 450000, costPrice: 300000, status: 'Yetarli' },
+      { id: 'p1', emoji: '👕', name: 'Erkaklar polo futbolkasi', category: 'Erkaklar kiyimi', unit: 'dona', stock: 15, price: 180000, costPrice: 120000, status: 'Yetarli', size: 'L', color: 'Ko‘k', gender: 'Erkaklar' },
+      { id: 'p2', emoji: '👖', name: 'Erkaklar jinsi shimi', category: 'Erkaklar kiyimi', unit: 'dona', stock: 3, price: 320000, costPrice: 220000, status: 'Kam', size: '32', color: 'To‘q ko‘k', gender: 'Erkaklar' },
+      { id: 'p3', emoji: '🧥', name: 'Qishki kurtka Zara', category: 'Ustki kiyimlar', unit: 'dona', stock: 1, price: 850000, costPrice: 600000, status: 'Tugagan', size: 'XL', color: 'Qora', gender: 'Erkaklar' },
+      { id: 'p4', emoji: '👟', name: 'Nike Air Force 1', category: 'Oyoq kiyimlar', unit: 'juft', stock: 8, price: 650000, costPrice: 450000, status: 'Yetarli', size: '42', color: 'Oq', gender: 'Uniseks' },
+      { id: 'p5', emoji: '👗', name: 'Ayollar kechki ko‘ylagi', category: 'Ayollar kiyimi', unit: 'dona', stock: 5, price: 450000, costPrice: 300000, status: 'Yetarli', size: 'M', color: 'Qizil', gender: 'Ayollar' },
     ],
     sampleAlerts: [
       { id: 'a1', dotColor: 'bg-rose-500', title: "Zara Kurtka — 1 dona qoldi", subtitle: "Mavsumiy tovar", subtitleColor: "text-rose-500" },

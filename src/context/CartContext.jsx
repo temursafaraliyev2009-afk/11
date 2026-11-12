@@ -1,10 +1,15 @@
 import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
 import { useLanguage } from './LanguageContext';
+import { useStore } from './StoreContext';
+import { getLocalDateString } from '../utils/dateUtils';
 
 const CartContext = createContext();
 
 export const CartProvider = ({ children }) => {
   const { lang, setLang } = useLanguage();
+  // Get active store context for proper user-scoped order syncing
+  const { currentStore, selectedStoreId } = useStore();
+  const storeActiveId = currentStore?.id || selectedStoreId || null;
 
   // Cart Items
   const [cart, setCart] = useState(() => {
@@ -111,7 +116,7 @@ export const CartProvider = ({ children }) => {
     setToasts(prev => [...prev, { id, message, type }]);
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
-    }, 3500);
+    }, 3000); // Aniq 3 soniya
   };
 
   const addToCart = (product, quantity = 1) => {
@@ -203,8 +208,8 @@ export const CartProvider = ({ children }) => {
 
     // Sync order to active store admin dashboard in localStorage
     try {
-      const activeStoreId = localStorage.getItem('savatchi_selected_store') || 'store_food';
-      const storeOrdersKey = 'savatchi_orders_' + activeStoreId;
+      const resolvedStoreId = storeActiveId || 'store_food';
+      const storeOrdersKey = 'savatchi_orders_' + resolvedStoreId;
       const productSummary = cart.map(i => `${i.name} (x${i.quantity || 1})`).join(', ');
 
       const adminOrder = {
@@ -214,13 +219,13 @@ export const CartProvider = ({ children }) => {
         customerName: shippingDetails.fullName || 'Onlayn Xaridor',
         phone: shippingDetails.phone || '',
         deliveryAddress: `${shippingDetails.address}, ${shippingDetails.city}`,
-        date: new Date().toISOString().split('T')[0],
+        date: getLocalDateString(new Date()),
         qty: `${cart.reduce((sum, item) => sum + (item.quantity || 1), 0)} dona`,
         total: finalTotal,
         status: 'Hali yo‘lda',
         type: 'customer',
         items: [...cart],
-        storeId: activeStoreId
+        storeId: resolvedStoreId
       };
 
       const existingRaw = localStorage.getItem(storeOrdersKey);

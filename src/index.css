@@ -1,5 +1,4 @@
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800;900&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -18,15 +17,28 @@
   width: 6px;
   height: 6px;
 }
+
 ::-webkit-scrollbar-track {
   background: rgba(241, 245, 249, 0.6);
 }
+
 ::-webkit-scrollbar-thumb {
   background: rgba(148, 163, 184, 0.4);
   border-radius: 9999px;
 }
+
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(100, 116, 139, 0.6);
+}
+
+/* Scoped Utility: hide scrollbars on specific compact pill bars while allowing touch scroll */
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 /* Soft Wave Backdrop Animation */
@@ -41,6 +53,7 @@
 .card-hover-effect {
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
+
 .card-hover-effect:hover {
   transform: translateY(-2px);
   box-shadow: 0 10px 25px -3px rgba(15, 23, 42, 0.08), 0 4px 6px -2px rgba(15, 23, 42, 0.03);
@@ -62,8 +75,8 @@ tr,
 td,
 th {
   transition: background-color 0.25s cubic-bezier(0.4, 0, 0.2, 1),
-              border-color 0.25s cubic-bezier(0.4, 0, 0.2, 1),
-              color 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    border-color 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+    color 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* ── Day Mode (Preserves original bright Savatchi design) ── */
@@ -137,6 +150,7 @@ html.dark body {
 html.dark ::-webkit-scrollbar-track {
   background: rgba(15, 23, 42, 0.45);
 }
+
 html.dark ::-webkit-scrollbar-thumb {
   background: rgba(148, 163, 184, 0.35);
 }
@@ -146,6 +160,7 @@ html.dark .bg-\[\#F3F6FD\],
 html.dark .bg-\[\#F4F7FC\] {
   background-color: var(--sv-page) !important;
 }
+
 html.dark .bg-\[\#F3F6FD\]\/90 {
   background-color: var(--sv-page-soft) !important;
 }
@@ -153,6 +168,7 @@ html.dark .bg-\[\#F3F6FD\]\/90 {
 html.dark .bg-\[\#0B132B\] {
   background-color: var(--sv-sidebar) !important;
 }
+
 html.dark .bg-\[\#131E3D\] {
   background-color: var(--sv-sidebar-card) !important;
 }
@@ -229,12 +245,14 @@ html.dark .bg-blue-50\/50,
 html.dark .hover\:bg-blue-50:hover {
   background-color: var(--sv-accent-soft) !important;
 }
+
 html.dark .border-blue-100,
 html.dark .border-blue-200,
 html.dark .border-blue-200\/80,
 html.dark .border-blue-200\/60 {
   border-color: rgba(59, 130, 246, 0.35) !important;
 }
+
 html.dark .text-blue-900,
 html.dark .text-blue-700,
 html.dark .text-blue-600 {
@@ -248,6 +266,7 @@ html.dark .bg-emerald-100,
 html.dark .hover\:bg-emerald-50:hover {
   background-color: var(--sv-emerald-soft) !important;
 }
+
 html.dark .text-emerald-700,
 html.dark .text-emerald-600 {
   color: var(--sv-emerald-text, #10B981) !important;
@@ -259,6 +278,7 @@ html.dark .bg-rose-50\/50,
 html.dark .hover\:bg-rose-50:hover {
   background-color: var(--sv-rose-soft) !important;
 }
+
 html.dark .text-rose-700,
 html.dark .text-rose-600 {
   color: var(--sv-rose-text, #F43F5E) !important;
@@ -269,6 +289,7 @@ html.dark .bg-amber-50\/30,
 html.dark .bg-amber-50\/50 {
   background-color: var(--sv-amber-soft) !important;
 }
+
 html.dark .text-amber-700,
 html.dark .text-amber-600 {
   color: var(--sv-amber-text, #F59E0B) !important;
@@ -286,10 +307,12 @@ html.dark textarea,
 html.dark select {
   color: var(--sv-text);
 }
+
 html.dark input[type="date"]::-webkit-calendar-picker-indicator {
   filter: invert(0.85);
   cursor: pointer;
 }
+
 html.dark select option {
   background-color: var(--sv-card);
   color: var(--sv-text);
@@ -309,9 +332,345 @@ html.dark .recharts-cartesian-axis-tick tspan,
 html.dark .recharts-text {
   fill: var(--sv-text-3) !important;
 }
+
 html.dark .recharts-cartesian-grid line {
   stroke: var(--sv-border) !important;
 }
+
 html.dark .recharts-tooltip-wrapper .bg-white {
   background-color: var(--sv-card) !important;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   UNIFIED BUTTON INTERACTION & ACTIVE PILL SYSTEM (SAVATCHI)
+   Matches the video sample interactions:
+   - Tactile click press animation (active:scale-[0.96])
+   - Subtle hover elevation and response (hover:scale-[1.02])
+   - Semantic color glow, borders, and rings
+   - Smooth transitions between states
+   - Dark/twilight theme compatibility
+   - Reduced motion accessibility support
+══════════════════════════════════════════════════════════════════════════════ */
+
+.btn-pill-base {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  font-weight: 700;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+  cursor: pointer;
+  outline: none;
+  position: relative;
+  z-index: 1;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+    background 0.2s ease,
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease;
+  will-change: transform, box-shadow;
+}
+
+.btn-pill-base:hover:not(:disabled) {
+  z-index: 2;
+  transform: translateY(-1.5px);
+}
+
+.btn-pill-base:active:not(:disabled) {
+  z-index: 1;
+  transform: translateY(0.5px) scale(0.97);
+}
+
+.btn-pill-base:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+  z-index: 3;
+}
+
+/* Inactive State */
+.btn-pill-inactive {
+  background-color: #f1f5f9;
+  color: #475569;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+}
+
+.btn-pill-inactive:hover:not(:disabled) {
+  background-color: #e2e8f0;
+  color: #0f172a;
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 8px -1px rgba(15, 23, 42, 0.08);
+}
+
+html.dark .btn-pill-inactive,
+html[data-theme='twilight'] .btn-pill-inactive {
+  background-color: var(--sv-muted, #283756) !important;
+  color: var(--sv-text-2, #cbd5e1) !important;
+  border: 1px solid var(--sv-border, #384c72) !important;
+}
+
+html.dark .btn-pill-inactive:hover:not(:disabled),
+html[data-theme='twilight'] .btn-pill-inactive:hover:not(:disabled) {
+  background-color: var(--sv-hover, #304266) !important;
+  color: #ffffff !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+  box-shadow: 0 2px 8px -1px rgba(0, 0, 0, 0.3) !important;
+}
+
+/* ── Semantic Active Variants (Video Sample Color Schemes) ── */
+
+/* 1. Blue (Barchasi, Savdo, etc.) */
+.btn-pill-blue {
+  background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%) !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(191, 219, 254, 0.5) !important;
+  box-shadow: 0 4px 14px -2px rgba(37, 99, 235, 0.45), 0 0 0 2px rgba(59, 130, 246, 0.25) !important;
+}
+
+.btn-pill-blue:hover:not(:disabled) {
+  box-shadow: 0 6px 18px -2px rgba(37, 99, 235, 0.55), 0 0 0 2.5px rgba(59, 130, 246, 0.35) !important;
+}
+
+/* 2. Emerald / Teal (Faol, To'langan, Yetkazildi) */
+.btn-pill-emerald {
+  background: linear-gradient(135deg, #059669 0%, #0d9488 100%) !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(167, 243, 208, 0.5) !important;
+  box-shadow: 0 4px 14px -2px rgba(16, 185, 129, 0.45), 0 0 0 2px rgba(16, 185, 129, 0.25) !important;
+}
+
+.btn-pill-emerald:hover:not(:disabled) {
+  box-shadow: 0 6px 18px -2px rgba(16, 185, 129, 0.55), 0 0 0 2.5px rgba(16, 185, 129, 0.35) !important;
+}
+
+/* 3. Amber / Orange (Bugungi to'lov, Yo'lda, Qarzlar hisoboti) */
+.btn-pill-amber {
+  background: linear-gradient(135deg, #f59e0b 0%, #ea580c 100%) !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(254, 215, 170, 0.5) !important;
+  box-shadow: 0 4px 14px -2px rgba(245, 158, 11, 0.45), 0 0 0 2px rgba(245, 158, 11, 0.25) !important;
+}
+
+.btn-pill-amber:hover:not(:disabled) {
+  box-shadow: 0 6px 18px -2px rgba(245, 158, 11, 0.55), 0 0 0 2.5px rgba(245, 158, 11, 0.35) !important;
+}
+
+/* 4. Rose / Red (Muddati o'tgan) */
+.btn-pill-rose {
+  background: linear-gradient(135deg, #e11d48 0%, #dc2626 100%) !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(254, 205, 211, 0.5) !important;
+  box-shadow: 0 4px 14px -2px rgba(225, 29, 72, 0.45), 0 0 0 2px rgba(225, 29, 72, 0.25) !important;
+}
+
+.btn-pill-rose:hover:not(:disabled) {
+  box-shadow: 0 6px 18px -2px rgba(225, 29, 72, 0.55), 0 0 0 2.5px rgba(225, 29, 72, 0.35) !important;
+}
+
+/* 5. Purple / Indigo (To'liq to'langan, Qaytarilgan, Ombor hisoboti) */
+.btn-pill-purple {
+  background: linear-gradient(135deg, #4f46e5 0%, #9333ea 100%) !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(233, 213, 255, 0.5) !important;
+  box-shadow: 0 4px 14px -2px rgba(147, 51, 234, 0.45), 0 0 0 2px rgba(147, 51, 234, 0.25) !important;
+}
+
+.btn-pill-purple:hover:not(:disabled) {
+  box-shadow: 0 6px 18px -2px rgba(147, 51, 234, 0.55), 0 0 0 2.5px rgba(147, 51, 234, 0.35) !important;
+}
+
+/* 6. Slate / Neutral (Bekor qilingan, Barcha buyurtmalar/qarzlar) */
+.btn-pill-slate {
+  background: linear-gradient(135deg, #475569 0%, #1e293b 100%) !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(203, 213, 225, 0.4) !important;
+  box-shadow: 0 4px 14px -2px rgba(30, 41, 59, 0.45), 0 0 0 2px rgba(100, 116, 139, 0.25) !important;
+}
+
+.btn-pill-slate:hover:not(:disabled) {
+  box-shadow: 0 6px 18px -2px rgba(30, 41, 59, 0.55), 0 0 0 2.5px rgba(100, 116, 139, 0.35) !important;
+}
+
+/* Inner Pill Counter Badges */
+.btn-pill-badge-active {
+  background-color: rgba(255, 255, 255, 0.22) !important;
+  color: #ffffff !important;
+  backdrop-filter: blur(4px);
+}
+
+.btn-pill-badge-inactive {
+  background-color: rgba(226, 232, 240, 0.9) !important;
+  color: #334155 !important;
+}
+
+html.dark .btn-pill-badge-inactive,
+html[data-theme='twilight'] .btn-pill-badge-inactive {
+  background-color: rgba(51, 65, 85, 0.8) !important;
+  color: #cbd5e1 !important;
+}
+
+/* Segmented Control Active Pill (e.g. Bugun/Hafta/Oy/Yil in Reports) */
+.btn-segment-active {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border: 1px solid rgba(203, 213, 225, 0.85) !important;
+  box-shadow: 0 2px 8px -1px rgba(15, 23, 42, 0.12), 0 0 0 2px rgba(59, 130, 246, 0.2) !important;
+}
+
+html.dark .btn-segment-active,
+html[data-theme='twilight'] .btn-segment-active {
+  background-color: var(--sv-card, #202d47) !important;
+  color: #ffffff !important;
+  border-color: var(--sv-border, #384c72) !important;
+  box-shadow: 0 2px 8px -1px rgba(0, 0, 0, 0.4), 0 0 0 2px rgba(96, 165, 250, 0.25) !important;
+}
+
+/* Accessibility: Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+
+  .btn-pill-base,
+  .btn-pill-base:hover,
+  .btn-pill-base:active {
+    transform: none !important;
+    transition: none !important;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   TOAST NOTIFICATION SOFT ANIMATIONS (SAVATCHI)
+   Strictly two animations: 250ms smooth enter, 250ms smooth exit (opacity + small translate)
+   ══════════════════════════════════════════════════════════════════════════════ */
+@keyframes toastEnterTop {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes toastExitTop {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+
+@keyframes toastEnterCenter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes toastExitCenter {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+.toast-enter-top {
+  animation: toastEnterTop 250ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.toast-exit-top {
+  animation: toastExitTop 250ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.toast-enter-center {
+  animation: toastEnterCenter 250ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.toast-exit-center {
+  animation: toastExitCenter 250ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   TOAST NOTIFICATION SOFT ANIMATIONS (SAVATCHI)
+   Strictly two animations: 250ms smooth enter, 250ms smooth exit (opacity + small translate)
+   ══════════════════════════════════════════════════════════════════════════════ */
+@keyframes toastEnterTop {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes toastExitTop {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+
+@keyframes toastEnterCenter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes toastExitCenter {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+.toast-enter-top {
+  animation: toastEnterTop 250ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.toast-exit-top {
+  animation: toastExitTop 250ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.toast-enter-center {
+  animation: toastEnterCenter 250ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.toast-exit-center {
+  animation: toastExitCenter 250ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }

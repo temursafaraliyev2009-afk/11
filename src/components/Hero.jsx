@@ -204,16 +204,16 @@ export const Hero = ({ selectedCategory, onSelectCategory }) => {
                 <button
                   key={cat.id}
                   onClick={() => onSelectCategory(cat.id)}
-                  className={`flex items-center space-x-2.5 px-4 py-2.5 rounded-2xl font-medium text-xs whitespace-nowrap transition-all duration-200 shadow-sm border ${
+                  className={`btn-pill-base px-4 py-2.5 rounded-2xl font-bold text-xs ${
                     isSelected
-                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-emerald-500/25 shadow-lg scale-105'
-                      : 'bg-white dark:bg-slate-900 border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-300 hover:border-emerald-500/50 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/30'
+                      ? 'btn-pill-emerald font-black'
+                      : 'btn-pill-inactive'
                   }`}
                 >
                   <Icon className={`w-4 h-4 ${isSelected ? 'text-white' : 'text-emerald-500'}`} />
                   <span>{cat.id === 'all' ? t('all', 'Barchasi') : tCategory(cat.name)}</span>
-                  <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${
-                    isSelected ? 'bg-emerald-700 text-emerald-100' : 'bg-gray-100 dark:bg-slate-800 text-gray-500'
+                  <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black transition-colors ${
+                    isSelected ? 'btn-pill-badge-active' : 'btn-pill-badge-inactive'
                   }`}>
                     {cat.count}
                   </span>

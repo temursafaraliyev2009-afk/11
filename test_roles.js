@@ -381,6 +381,7 @@ async function runTests() {
   const allPassed = Object.values(results).every(r => r.pass);
   console.log(`UMUMIY NATIJA: ${allPassed ? 'BARCHA SINOVLAR (A-H) 100% MUVAFFAQ QILINDI!' : 'AYRIM SINOVLARDA XATOLIK BOR'}`);
   console.log('====================================================');
+  process.exit(allPassed ? 0 : 1);
 }
 
 runTests();

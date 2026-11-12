@@ -1,6 +1,6 @@
 // src/components/StatCard.jsx
 import React from 'react';
-import { TrendingUp, Package, Users, ShoppingBag, ArrowUpRight } from 'lucide-react';
+import { TrendingUp, Package, Users, ShoppingBag, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, Area } from 'recharts';
 
 export const StatCard = ({
@@ -8,11 +8,13 @@ export const StatCard = ({
   value,
   subtext,
   badgeText,
+  trend, // 'up' | 'down' | 'neutral'
   linkText,
   type = 'sales',
   sparklineColor = '#10B981',
   sparklineData,
-  onAction
+  onAction,
+  showChart = (type === 'sales')
 }) => {
   // Default sparkline trend lines matching reference curves
   const defaultSparklines = {
@@ -30,7 +32,11 @@ export const StatCard = ({
     ]
   };
 
-  const chartData = sparklineData || defaultSparklines[type] || defaultSparklines.sales;
+  // Agar qiymat 0 bo'lsa yoki bo'sh bo'lsa, soxta o'sish egri chizig'i o'rniga haqiqiy tekis 0 chiziq ko'rsatiladi
+  const isZeroValue = !value || String(value).trim().startsWith('0 ') || String(value).trim() === '0';
+
+  const emptySparkline = [{ v: 0 }, { v: 0 }];
+  const chartData = sparklineData || (isZeroValue ? emptySparkline : (defaultSparklines[type] || defaultSparklines.sales));
 
   // Icon config
   const icons = {
@@ -90,14 +96,32 @@ export const StatCard = ({
             </div>
 
             {/* Sub-label badge or link */}
-            {badgeText && (
-              <div className="flex items-center space-x-1 text-emerald-600 text-[11px] font-bold mt-1">
-                <ArrowUpRight className="w-3.5 h-3.5 stroke-[2.5]" />
-                <span>{badgeText}</span>
-              </div>
-            )}
+            {badgeText && (() => {
+              const bStr = String(badgeText).trim();
+              const isNegative = trend === 'down' || bStr.startsWith('-') || bStr.includes('↓');
+              const isNeutral = trend === 'neutral' || bStr === '0%' || bStr.startsWith('0%') || bStr.includes('ta savdo');
 
-            {linkText && (
+              const badgeColor = isNegative
+                ? 'text-rose-600'
+                : isNeutral
+                ? 'text-slate-400'
+                : 'text-emerald-600';
+
+              const cleanText = bStr.replace(/^[↑↓]\s*/, '');
+
+              return (
+                <div className={`flex items-center space-x-1 text-[11px] font-bold mt-1 ${badgeColor}`}>
+                  {isNegative ? (
+                    <ArrowDownRight className="w-3.5 h-3.5 stroke-[2.5]" />
+                  ) : !isNeutral ? (
+                    <ArrowUpRight className="w-3.5 h-3.5 stroke-[2.5]" />
+                  ) : null}
+                  <span>{cleanText}</span>
+                </div>
+              );
+            })()}
+
+            {showChart && linkText && (
               <button
                 onClick={onAction}
                 className="text-[11px] font-bold text-blue-600 hover:text-blue-700 mt-1 flex items-center gap-0.5 transition-colors"
@@ -109,28 +133,39 @@ export const StatCard = ({
         </div>
       </div>
 
-      {/* Sparkline Area Chart at Bottom */}
-      <div className="h-14 w-full -mb-2 mt-2 -mx-2">
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={chartData} margin={{ top: 10, right: 0, left: 0, bottom: 0 }}>
-            <defs>
-              <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={config.color} stopOpacity={0.25} />
-                <stop offset="100%" stopColor={config.color} stopOpacity={0.0} />
-              </linearGradient>
-            </defs>
-            <Area
-              type="monotone"
-              dataKey="v"
-              stroke={config.color}
-              strokeWidth={2.2}
-              fillOpacity={1}
-              fill={`url(#${gradientId})`}
-              isAnimationActive={true}
-            />
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
+      {/* Bottom Area: Chart OR Action Link */}
+      {showChart ? (
+        <div className="h-14 w-full -mb-2 mt-2 -mx-2">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={chartData} margin={{ top: 10, right: 0, left: 0, bottom: 0 }}>
+              <defs>
+                <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={config.color} stopOpacity={0.25} />
+                  <stop offset="100%" stopColor={config.color} stopOpacity={0.0} />
+                </linearGradient>
+              </defs>
+              <Area
+                type="monotone"
+                dataKey="v"
+                stroke={config.color}
+                strokeWidth={2.2}
+                fillOpacity={1}
+                fill={`url(#${gradientId})`}
+                isAnimationActive={true}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      ) : linkText ? (
+        <div className="mt-3 pt-2.5 border-t border-slate-100/90 flex items-center justify-between">
+          <button
+            onClick={onAction}
+            className="text-[11px] font-bold text-blue-600 hover:text-blue-700 flex items-center gap-0.5 transition-colors"
+          >
+            <span>{linkText}</span>
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 };

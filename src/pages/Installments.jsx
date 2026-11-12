@@ -32,7 +32,8 @@ import {
   Eye,
   XCircle,
   Check,
-  RotateCcw
+  RotateCcw,
+  Trash2
 } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 import { useLanguage } from '../context/LanguageContext';
@@ -75,16 +76,19 @@ export const Installments = ({ setActiveTab: setParentActiveTab }) => {
     addInstallmentPayment,
     cancelInstallmentContract,
     restoreInstallmentContract,
+    deleteInstallmentContract,
     isInstallmentAllowed,
     products = [],
     debts = [],
     rentals = [],
     currentStore,
-    storeConfig
+    storeConfig,
+    isItemPendingDelete,
+    setItemPendingDelete
   } = useStore();
 
   const { t } = useLanguage();
-  const { notifySuccess, notifyError } = useToast();
+  const { notifySuccess, notifyError, showUndoDelete } = useToast();
 
   const todayStr = getTashkentDateString();
 
@@ -93,6 +97,14 @@ export const Installments = ({ setActiveTab: setParentActiveTab }) => {
   const [activeTab, setLocalActiveTab] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 8;
+
+  // ─── Deleting Contract State (5 soniyalik bekor qilish uchun) ──────────────
+  const [deletingContract, setDeletingContract] = useState(null);
+
+  // Faol (o'chirish jarayonida bo'lmagan) shartnomalar
+  const activeInstallments = useMemo(() => {
+    return (installments || []).filter(c => !isItemPendingDelete(c.id));
+  }, [installments, isItemPendingDelete]);
 
   // ─── New Contract Modal State ──────────────────────────────────────────────
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -183,7 +195,9 @@ export const Installments = ({ setActiveTab: setParentActiveTab }) => {
     const q = productSearchQuery.trim().toLowerCase();
     return availableProducts.filter(p =>
       (p.name || '').toLowerCase().includes(q) ||
-      (p.category || '').toLowerCase().includes(q)
+      (p.category || '').toLowerCase().includes(q) ||
+      (p.size || '').toLowerCase().includes(q) ||
+      (p.color || '').toLowerCase().includes(q)
     );
   }, [availableProducts, productSearchQuery]);
 
@@ -221,9 +235,9 @@ export const Installments = ({ setActiveTab: setParentActiveTab }) => {
 
   // ─── Tab counts ────────────────────────────────────────────────────────────
   const tabCounts = useMemo(() => {
-    let all = installments.length;
+    let all = activeInstallments.length;
     let active = 0, due = 0, overdue = 0, completed = 0, cancelled = 0;
-    installments.forEach(c => {
+    activeInstallments.forEach(c => {
       const s = getStatus(c);
       if (s === 'cancelled') {
         cancelled++;
@@ -237,11 +251,11 @@ export const Installments = ({ setActiveTab: setParentActiveTab }) => {
       }
     });
     return { all, active, due, overdue, completed, cancelled };
-  }, [installments, todayStr]);
+  }, [activeInstallments, todayStr]);
 
   // ─── Filtered list ─────────────────────────────────────────────────────────
   const filteredContracts = useMemo(() => {
-    return installments.filter((c) => {
+    return activeInstallments.filter((c) => {
       const status = getStatus(c);
 
       // Tab filter
@@ -269,7 +283,7 @@ export const Installments = ({ setActiveTab: setParentActiveTab }) => {
 
       return true;
     });
-  }, [installments, activeTab, searchQuery, todayStr]);
+  }, [activeInstallments, activeTab, searchQuery, todayStr]);
 
   // ─── Pagination ────────────────────────────────────────────────────────────
   const totalPages = Math.max(1, Math.ceil(filteredContracts.length / pageSize));
@@ -340,7 +354,11 @@ export const Installments = ({ setActiveTab: setParentActiveTab }) => {
         qty: 1,
         unit: product.unit || 'dona',
         emoji: product.emoji || '📦',
-        maxStock: Number(product.stock) || 0
+        maxStock: Number(product.stock) || 0,
+        size: product.size || '',
+        color: product.color || '',
+        gender: product.gender || '',
+        category: product.category || ''
       }]);
     }
   };
@@ -598,7 +616,7 @@ export const Installments = ({ setActiveTab: setParentActiveTab }) => {
         </div>
         <h3 className="text-lg font-black text-slate-800">Muddatli to'lov xizmati mavjud emas</h3>
         <p className="text-xs text-slate-500 mt-2 font-medium leading-relaxed">
-          Muddatli to'lov (bo'lib to'lash) funksiyasi faqat <strong>Telefon do'koni</strong>, <strong>Qurilish mollari</strong>, <strong>Uy-ro'zg'or buyumlari</strong> va <strong>Sport jihozlari</strong> do'konlari uchun mo'ljallangan. Hozirgi do'koningiz turi ushbu xizmatni qo'llab-quvvatlamaydi.
+          Muddatli to'lov (bo'lib to'lash) funksiyasi faqat <strong>Telefon do'koni</strong>, <strong>Qurilish mollari</strong>, <strong>Uy-ro'zg'or buyumlari</strong>, <strong>Sport jihozlari</strong> va <strong>Kiyim-kechak</strong> do'konlari uchun mo'ljallangan. Hozirgi do'koningiz turi ushbu xizmatni qo'llab-quvvatlamaydi.
         </p>
         <button
           onClick={() => setParentActiveTab && setParentActiveTab('dashboard')}
@@ -745,12 +763,12 @@ export const Installments = ({ setActiveTab: setParentActiveTab }) => {
         {/* 6 Filter Buttons */}
         <div className="flex flex-wrap items-center gap-2 sm:gap-2.5 pt-1 border-t border-slate-100">
           {[
-            { key: 'all', label: 'Barchasi', count: tabCounts.all, gradient: 'from-blue-600 to-indigo-600', shadow: 'shadow-blue-600/25' },
-            { key: 'active', label: 'Faol', count: tabCounts.active, gradient: 'from-emerald-600 to-teal-600', shadow: 'shadow-emerald-600/25' },
-            { key: 'due', label: 'Bugungi to‘lov', count: tabCounts.due, gradient: 'from-amber-500 to-orange-500', shadow: 'shadow-amber-500/25' },
-            { key: 'overdue', label: 'Muddati o\'tgan', count: tabCounts.overdue, gradient: 'from-rose-600 to-red-600', shadow: 'shadow-rose-600/25' },
-            { key: 'completed', label: 'To‘liq to‘langan', count: tabCounts.completed, gradient: 'from-indigo-600 to-purple-600', shadow: 'shadow-indigo-600/25' },
-            { key: 'cancelled', label: 'Bekor qilingan', count: tabCounts.cancelled, gradient: 'from-slate-600 to-slate-700', shadow: 'shadow-slate-600/25' },
+            { key: 'all', label: 'Barchasi', count: tabCounts.all, variant: 'btn-pill-blue' },
+            { key: 'active', label: 'Faol', count: tabCounts.active, variant: 'btn-pill-emerald' },
+            { key: 'due', label: 'Bugungi to‘lov', count: tabCounts.due, variant: 'btn-pill-amber' },
+            { key: 'overdue', label: "Muddati o'tgan", count: tabCounts.overdue, variant: 'btn-pill-rose' },
+            { key: 'completed', label: 'To‘liq to‘langan', count: tabCounts.completed, variant: 'btn-pill-purple' },
+            { key: 'cancelled', label: 'Bekor qilingan', count: tabCounts.cancelled, variant: 'btn-pill-slate' },
           ].map((tab) => {
             const isSelected = activeTab === tab.key;
             return (
@@ -758,15 +776,13 @@ export const Installments = ({ setActiveTab: setParentActiveTab }) => {
                 key={tab.key}
                 type="button"
                 onClick={() => handleTabChange(tab.key)}
-                className={`px-3.5 sm:px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 cursor-pointer select-none active:scale-[0.98] ${
-                  isSelected
-                    ? `bg-gradient-to-r ${tab.gradient} text-white shadow-md ${tab.shadow} font-black ring-2 ring-offset-1 ring-blue-400/30`
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200/80 hover:text-slate-800 border border-slate-200/40'
+                className={`btn-pill-base px-3.5 sm:px-4 py-2.5 rounded-2xl text-xs sm:text-sm ${
+                  isSelected ? `${tab.variant} font-black` : 'btn-pill-inactive'
                 }`}
               >
                 <span>{tab.label}</span>
                 <span className={`px-2 py-0.5 rounded-lg text-[11px] font-black transition-colors ${
-                  isSelected ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+                  isSelected ? 'btn-pill-badge-active' : 'btn-pill-badge-inactive'
                 }`}>
                   {tab.count}
                 </span>
@@ -1111,6 +1127,16 @@ export const Installments = ({ setActiveTab: setParentActiveTab }) => {
                             <div className="flex items-center gap-2.5 truncate">
                               <span className="text-base shrink-0">{prod.emoji || '📦'}</span>
                               <span className="truncate">{prod.name}</span>
+                              {prod.size && (
+                                <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-bold shrink-0">
+                                  {prod.size}
+                                </span>
+                              )}
+                              {prod.color && (
+                                <span className="px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 text-[10px] font-bold shrink-0">
+                                  {prod.color}
+                                </span>
+                              )}
                               <span className="text-[10px] font-medium text-slate-400 shrink-0">
                                 (Omborda: {prod.stock} {prod.unit || 'dona'})
                               </span>
@@ -1135,6 +1161,16 @@ export const Installments = ({ setActiveTab: setParentActiveTab }) => {
                           <div className="flex items-center gap-2 truncate pr-2">
                             <span>{it.emoji}</span>
                             <span className="text-xs font-bold text-slate-800 truncate">{it.name}</span>
+                            {it.size && (
+                              <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-bold shrink-0">
+                                {it.size}
+                              </span>
+                            )}
+                            {it.color && (
+                              <span className="px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 text-[10px] font-bold shrink-0">
+                                {it.color}
+                              </span>
+                            )}
                             <span className="text-[10px] text-slate-400 font-medium shrink-0">
                               ({Number(it.price).toLocaleString()} so'm)
                             </span>
@@ -1414,7 +1450,19 @@ export const Installments = ({ setActiveTab: setParentActiveTab }) => {
                   <div className="space-y-1.5">
                     {(selectedContract.items || []).map((item, idx) => (
                       <div key={idx} className="flex items-center justify-between p-2.5 bg-slate-50 rounded-xl border border-slate-100 text-xs">
-                        <span className="font-bold text-slate-800">{item.name} ({item.qty} {item.unit || 'dona'})</span>
+                        <div className="flex items-center gap-2 truncate">
+                          <span className="font-bold text-slate-800">{item.name} ({item.qty} {item.unit || 'dona'})</span>
+                          {item.size && (
+                            <span className="px-1.5 py-0.5 rounded bg-slate-200/70 text-slate-700 text-[10px] font-bold shrink-0">
+                              Razmer: {item.size}
+                            </span>
+                          )}
+                          {item.color && (
+                            <span className="px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 text-[10px] font-bold shrink-0">
+                              Rang: {item.color}
+                            </span>
+                          )}
+                        </div>
                         <span className="font-extrabold text-slate-900">{Number(item.total || 0).toLocaleString()} so'm</span>
                       </div>
                     ))}
@@ -1694,6 +1742,86 @@ export const Installments = ({ setActiveTab: setParentActiveTab }) => {
                     <p className="text-xs font-medium text-slate-600">{selectedContract.notes}</p>
                   </div>
                 )}
+
+                {/* ── Shartnomani o'chirish tugmasi ─────────────────────────── */}
+                <div className="pt-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setDeletingContract(selectedContract)}
+                    className="w-full py-2.5 rounded-2xl bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold text-xs border border-rose-200/80 flex items-center justify-center gap-2 transition-all cursor-pointer"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>Shartnoma yozuvini o‘chirish</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════════
+         SHARTNOMANI O'CHIRISH VA 5 SONIYALIK BEKOR QILISH TASDIQ MODALI
+         ═══════════════════════════════════════════════════════════════════════ */}
+      {deletingContract && (
+        <ModalPortal>
+          <div className="fixed inset-0 z-[99999] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 font-sans select-none animate-in fade-in duration-150">
+            <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl border border-slate-100 space-y-4 text-center">
+              <div className="w-14 h-14 rounded-2xl bg-rose-50 border border-rose-100 text-rose-600 flex items-center justify-center mx-auto shadow-sm">
+                <Trash2 className="w-7 h-7" />
+              </div>
+
+              <div className="space-y-1.5">
+                <h3 className="font-extrabold text-slate-900 text-base leading-snug">
+                  Shartnomani o‘chirishni tasdiqlaysizmi?
+                </h3>
+                <p className="text-xs text-slate-600 font-semibold">
+                  {deletingContract.contractNumber} — {deletingContract.customerName}
+                </p>
+              </div>
+
+              <div className="flex items-center space-x-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setDeletingContract(null)}
+                  className="flex-1 py-3 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition-colors cursor-pointer"
+                >
+                  Bekor qilish
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const targetContract = deletingContract;
+                    setDeletingContract(null);
+                    setSelectedContract(null);
+                    if (!targetContract || isItemPendingDelete(targetContract.id)) return;
+
+                    // 1. Vaqtincha interfeysdan yashirish (bazaga tegilmaydi)
+                    setItemPendingDelete(targetContract.id, true);
+
+                    // 2. 5 soniyalik bekor qilish bildirishnomasini ko'rsatish
+                    showUndoDelete({
+                      title: 'Shartnoma o‘chirilmoqda...',
+                      seconds: 5,
+                      successMessage: 'Shartnoma muvaffaqiyatli o‘chirildi.',
+                      onUndo: () => {
+                        setItemPendingDelete(targetContract.id, false);
+                      },
+                      onCommit: async () => {
+                        try {
+                          deleteInstallmentContract(targetContract.id);
+                          setItemPendingDelete(targetContract.id, false);
+                        } catch (err) {
+                          setItemPendingDelete(targetContract.id, false);
+                          throw err;
+                        }
+                      }
+                    });
+                  }}
+                  className="flex-1 py-3 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-lg shadow-rose-600/25 transition-all cursor-pointer"
+                >
+                  O‘chirish
+                </button>
               </div>
             </div>
           </div>

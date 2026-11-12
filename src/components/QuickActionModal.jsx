@@ -16,28 +16,21 @@ import {
 import { useStore } from '../context/StoreContext';
 import { useLanguage } from '../context/LanguageContext';
 import { useToast } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 import { StoreIcon } from './StoreIcon';
 
 export const QuickActionModal = ({ type, isOpen, onClose }) => {
+  const { user } = useAuth();
   const { products, addSale, addDebt, addProduct, addOrder, storeConfig, employees, currentStore, currentUserName, isDebtsAllowed } = useStore();
   const { t } = useLanguage();
   const { notifySuccess } = useToast();
+
+  const sellerName = user?.displayName || user?.firstName || (user?.email ? user.email.split('@')[0] : '') || currentUserName || 'Foydalanuvchi';
 
   // State for Sale
   const [selectedProduct, setSelectedProduct] = useState(products[0]?.id || '');
   const [saleQty, setSaleQty] = useState(1);
   const [paymentType, setPaymentType] = useState('Naqd');
-  const [selectedSeller, setSelectedSeller] = useState(currentUserName || employees[0]?.name || 'Foydalanuvchi');
-
-  useEffect(() => {
-    if (isOpen) {
-      if (currentUserName) {
-        setSelectedSeller(currentUserName);
-      } else if (employees[0]?.name) {
-        setSelectedSeller(employees[0].name);
-      }
-    }
-  }, [isOpen, currentUserName, employees]);
 
   // State for Debt
   const [debtName, setDebtName] = useState('');
@@ -95,9 +88,9 @@ export const QuickActionModal = ({ type, isOpen, onClose }) => {
       unit: currentProdObj.unit,
       price: currentProdObj.price,
       costPrice: currentProdObj.costPrice,
-      seller: selectedSeller,
+      seller: sellerName,
       paymentType: paymentType
-    }, selectedSeller);
+    }, sellerName);
     notifySuccess(t('saleSuccessTitle', 'Savdo saqlandi!'), `${currentProdObj.name} (${saleQty} ${currentProdObj.unit || 'dona'}) savdosi amalga oshirildi.`);
     onClose();
   };
@@ -259,21 +252,14 @@ export const QuickActionModal = ({ type, isOpen, onClose }) => {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block font-bold text-slate-700 mb-1">{t('colEmployee', 'Sotuvchi (Kassir)')}</label>
-                <select
-                  value={selectedSeller}
-                  onChange={(e) => setSelectedSeller(e.target.value)}
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-2xl font-semibold text-slate-900 focus:outline-none cursor-pointer"
-                >
-                  {currentUserName && !employees.some(e => e.name === currentUserName) && (
-                    <option value={currentUserName}>{currentUserName} (Siz)</option>
-                  )}
-                  {employees.map(emp => (
-                    <option key={emp.id} value={emp.name}>
-                      {emp.name}{emp.name === currentUserName ? ' (Siz)' : ''}
-                    </option>
-                  ))}
-                </select>
+                <label className="block font-bold text-slate-700 mb-1">{t('navSeller', 'Sotuvchi')}</label>
+                <input
+                  type="text"
+                  readOnly
+                  disabled
+                  value={sellerName}
+                  className="w-full p-3 bg-slate-100 border border-slate-200 rounded-2xl font-semibold text-slate-700 cursor-not-allowed select-none focus:outline-none"
+                />
               </div>
 
               <div className="p-3 bg-emerald-50 rounded-2xl border border-emerald-100 flex flex-col justify-center">

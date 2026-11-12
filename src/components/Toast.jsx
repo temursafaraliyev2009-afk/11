@@ -1,31 +1,31 @@
 import React from 'react';
 import { useCart } from '../context/CartContext';
-import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
+import { CheckCircle2, AlertCircle, Info } from 'lucide-react';
 
 export const ToastContainer = () => {
   const { toasts } = useCart();
 
-  if (toasts.length === 0) return null;
+  if (!toasts || toasts.length === 0) return null;
 
   return (
-    <div className="fixed bottom-6 right-6 z-50 flex flex-col space-y-3 max-w-md w-full pointer-events-none">
+    <div className="fixed top-4 sm:top-5 inset-x-0 z-[99999] flex flex-col items-center space-y-2 pointer-events-none px-3 pt-[env(safe-area-inset-top,0px)]">
       {toasts.map(toast => (
         <div
           key={toast.id}
-          className={`pointer-events-auto flex items-center justify-between p-4 rounded-xl shadow-2xl backdrop-blur-md border transition-all duration-300 transform translate-y-0 animate-bounce-short ${
+          className={`pointer-events-auto flex items-center gap-3 px-3.5 py-2.5 sm:px-4 sm:py-3 rounded-2xl shadow-xl backdrop-blur-md border max-w-[92vw] sm:max-w-md w-auto transition-all duration-300 transform animate-in fade-in slide-in-from-top-3 ${
             toast.type === 'success'
-              ? 'bg-emerald-900/90 text-emerald-100 border-emerald-500/50'
+              ? 'bg-emerald-950/90 text-emerald-100 border-emerald-500/40'
               : toast.type === 'error'
-              ? 'bg-rose-900/90 text-rose-100 border-rose-500/50'
-              : 'bg-slate-900/90 text-slate-100 border-slate-700'
+              ? 'bg-rose-950/90 text-rose-100 border-rose-500/40'
+              : 'bg-slate-900/90 text-slate-100 border-slate-700/60'
           }`}
         >
-          <div className="flex items-center space-x-3">
-            {toast.type === 'success' && <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />}
-            {toast.type === 'error' && <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />}
-            {toast.type === 'info' && <Info className="w-5 h-5 text-sky-400 shrink-0" />}
-            <p className="text-sm font-medium">{toast.message}</p>
+          <div className="w-7 h-7 rounded-xl bg-white/10 flex items-center justify-center shrink-0">
+            {toast.type === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
+            {toast.type === 'error' && <AlertCircle className="w-4 h-4 text-rose-400" />}
+            {toast.type === 'info' && <Info className="w-4 h-4 text-sky-400" />}
           </div>
+          <p className="text-xs sm:text-sm font-bold leading-tight">{toast.message}</p>
         </div>
       ))}
     </div>

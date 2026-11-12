@@ -24,7 +24,7 @@ export function fixAllOrders(storage = (typeof window !== 'undefined' ? window.l
   try {
     for (let i = 0; i < storage.length; i++) {
       const key = storage.key(i);
-      if (key && (key === 'savatchi_orders' || key.startsWith('savatchi_orders_'))) {
+      if (key && (key === 'savatchi_orders' || key.startsWith('savatchi_orders_') || (key.startsWith('savatchi_') && key.includes('_orders_')))) {
         orderKeys.push(key);
       }
     }
@@ -110,6 +110,13 @@ export function fixAllOrders(storage = (typeof window !== 'undefined' ? window.l
         // 7. Sana
         const date = o.date ? String(o.date) : new Date().toISOString().split('T')[0];
 
+        // 8. Do‘konga egalik (storeId)
+        let keyStoreId = '';
+        if (key.includes('_orders_')) {
+          keyStoreId = key.split('_orders_')[1] || '';
+        }
+        const storeId = o.storeId || keyStoreId || '';
+
         const cleanedOrder = {
           ...o,
           id,
@@ -119,7 +126,8 @@ export function fixAllOrders(storage = (typeof window !== 'undefined' ? window.l
           qty,
           total,
           status,
-          date
+          date,
+          storeId
         };
 
         cleanedOrders.push(cleanedOrder);

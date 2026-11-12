@@ -10,7 +10,8 @@ import {
   ChevronDown,
   Sparkles,
   TrendingUp,
-  AlertCircle
+  AlertCircle,
+  Wallet
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -29,7 +30,14 @@ import { useLanguage } from '../context/LanguageContext';
 import { QuickActionModal } from '../components/QuickActionModal';
 import { StoreIcon } from '../components/StoreIcon';
 import { getLocalDateString, getOffsetDateString, isToday } from '../utils/dateUtils';
-import { isReturnedSale, isDebtCollectionSale, aggregateSalesFinancials } from '../utils/financeUtils.js';
+import {
+  isReturnedSale,
+  isDebtCollectionSale,
+  getSaleFinancials,
+  aggregateSalesFinancials,
+  formatChartAxisNumber,
+  calculateGrowthMetrics
+} from '../utils/financeUtils.js';
 
 export const Dashboard = ({ setActiveTab }) => {
   const { user } = useAuth();
@@ -45,6 +53,8 @@ export const Dashboard = ({ setActiveTab }) => {
     isOwner,
     isEmployee,
     isDebtsAllowed,
+    isInstallmentAllowed,
+    installmentStats,
     currentUserName,
     currentUserId
   } = useStore();
@@ -65,37 +75,22 @@ export const Dashboard = ({ setActiveTab }) => {
     return Math.min(15, Math.max(0.8, ratio));
   }, [storeConfig]);
 
-  // Real today's sales from shared state (filtering returns, debt collections, and future hours)
+  // Real today's sales from shared state (filtering returns and debt collections)
   const today = useMemo(() => getLocalDateString(), []);
   const todaySalesList = useMemo(() => {
-    const currentHour = new Date().getHours();
     return sales.filter(s => {
       if (!s || !isToday(s.date) || isReturnedSale(s) || isDebtCollectionSale(s)) return false;
-      if (s.time) {
-        const h = parseInt(s.time.split(':')[0], 10);
-        if (!isNaN(h) && h > currentHour) return false;
-      }
       return true;
     });
   }, [sales, today]);
-  
-  // Bugungi jami tovar savdosi summasi
-  const todaySalesAmount = useMemo(() => {
-    return todaySalesList.reduce((sum, s) => sum + (Number(s.total) || 0), 0);
-  }, [todaySalesList]);
   
   // Bugungi tovar savdolari soni
   const todaySalesCount = todaySalesList.length;
 
   // Bugungi to'lov turlari (Kassa kirimi: Haqiqatda qabul qilingan Naqd va Karta to'lovlari)
   const todayFinSummary = useMemo(() => {
-    const currentHour = new Date().getHours();
     const todayAllSales = sales.filter(s => {
       if (!s || !isToday(s.date) || isReturnedSale(s)) return false;
-      if (s.time) {
-        const h = parseInt(s.time.split(':')[0], 10);
-        if (!isNaN(h) && h > currentHour) return false;
-      }
       return true;
     });
     return aggregateSalesFinancials(todayAllSales, products, today);
@@ -103,6 +98,21 @@ export const Dashboard = ({ setActiveTab }) => {
 
   const todayCashSales = todayFinSummary.cashSales;
   const todayCardSales = todayFinSummary.cardSales;
+
+  // MUHIM: Bugungi haqiqiy pul tushumi (kassa kirimi)
+  // Muddatli shartnomaning to'liq narxi (6M) emas, faqat haqiqatda qabul qilingan summalar
+  const todaySalesAmount = todayFinSummary.cashReceipts;
+
+  // Bugungi pul tushumi yozuvlari (grafik uchun — faqat haqiqiy kassa kirimi > 0 bo'lgan tranzaksiyalar)
+  const todayCashFlowEntries = useMemo(() => {
+    return sales.filter(s => {
+      if (!s || !isToday(s.date) || isReturnedSale(s)) return false;
+      return true;
+    }).map(s => {
+      const fin = getSaleFinancials(s, products);
+      return { ...s, cashAmount: fin.cashReceipt };
+    }).filter(s => s.cashAmount > 0);
+  }, [sales, today, products]);
 
   // Bugun sotilgan mahsulotlar bo'yicha ma'lumotlar
   const todayProductsBreakdown = useMemo(() => {
@@ -126,39 +136,48 @@ export const Dashboard = ({ setActiveTab }) => {
 
   // All-time merchandise sales stats (filtered up to today, excluding future, returns, and debt collections)
   const validAllSales = useMemo(() => {
-    const currentHour = new Date().getHours();
     return sales.filter(s => {
       if (!s || isReturnedSale(s) || isDebtCollectionSale(s)) return false;
       const sDate = s.date || today;
       if (sDate > today) return false;
-      if (sDate === today && s.time) {
-        const h = parseInt(s.time.split(':')[0], 10);
-        if (!isNaN(h) && h > currentHour) return false;
-      }
       return true;
     });
   }, [sales, today]);
   const allSalesAmount = useMemo(() => validAllSales.reduce((sum, s) => sum + (Number(s.total) || 0), 0), [validAllSales]);
   const allSalesCount = validAllSales.length;
 
+  // Barcha kunlar uchun haqiqiy pul tushumi yozuvlari (grafik uchun)
+  const allCashFlowEntries = useMemo(() => {
+    return sales.filter(s => {
+      if (!s || isReturnedSale(s)) return false;
+      const sDate = s.date || today;
+      if (sDate > today) return false;
+      return true;
+    }).map(s => {
+      const fin = getSaleFinancials(s, products);
+      return { ...s, cashAmount: fin.cashReceipt };
+    }).filter(s => s.cashAmount > 0);
+  }, [sales, today, products]);
+  const allCashTotal = useMemo(() => allCashFlowEntries.reduce((sum, s) => sum + s.cashAmount, 0), [allCashFlowEntries]);
+  const allCashCount = allCashFlowEntries.length;
+
   // Display stats based on selected time range
-  const displaySalesAmount = selectedTimeRange === 'Barchasi' ? allSalesAmount : todaySalesAmount;
+  const displaySalesAmount = selectedTimeRange === 'Barchasi' ? allCashTotal : todaySalesAmount;
   const displaySalesCount = selectedTimeRange === 'Barchasi' ? allSalesCount : todaySalesCount;
 
-  // Real percentage comparison (today vs yesterday from real data, strictly excluding returns and debt collections)
-  const salesGrowthPct = useMemo(() => {
+  // Kechagi kassa kirimi bilan solishtirish (haqiqiy pul tushumi asosida)
+  const salesGrowthMetrics = useMemo(() => {
     const yesterdayStr = getOffsetDateString(-1);
-    const yesterdaySales = sales.filter(s => s.date === yesterdayStr && !isReturnedSale(s) && !isDebtCollectionSale(s));
-    const yesterdaySum = yesterdaySales.reduce((sum, s) => sum + (Number(s.total) || 0), 0);
-    if (yesterdaySum === 0) return todaySalesAmount > 0 ? '+100' : '0';
-    const pct = (((todaySalesAmount - yesterdaySum) / yesterdaySum) * 100).toFixed(1);
-    return Number(pct) >= 0 ? `+${pct}` : pct;
-  }, [todaySalesList, todaySalesAmount, sales]);
+    const yesterdayAllSales = sales.filter(s => s && s.date === yesterdayStr && !isReturnedSale(s));
+    const yesterdayFin = aggregateSalesFinancials(yesterdayAllSales, products, yesterdayStr);
+    const yesterdayCash = yesterdayFin.cashReceipts;
+    return calculateGrowthMetrics(todaySalesAmount, yesterdayCash);
+  }, [todaySalesAmount, sales, products]);
 
   // Dynamic Sales timeline chart data — real data from sales shared state
   const salesChartData = useMemo(() => {
     if (selectedTimeRange === 'Barchasi') {
-      const allSales = [...validAllSales].sort((a, b) => {
+      const allSales = [...allCashFlowEntries].sort((a, b) => {
         const dComp = (a.date || '').localeCompare(b.date || '');
         if (dComp !== 0) return dComp;
         return (a.time || '').localeCompare(b.time || '');
@@ -183,7 +202,7 @@ export const Dashboard = ({ setActiveTab }) => {
             qty: s.qty,
             seller: s.seller,
             paymentType: s.paymentType,
-            amount: Number(s.total) || 0
+            amount: s.cashAmount
           }
         ];
       }
@@ -208,13 +227,13 @@ export const Dashboard = ({ setActiveTab }) => {
           qty: s.qty,
           seller: s.seller,
           paymentType: s.paymentType,
-          amount: Number(s.total) || 0
+          amount: s.cashAmount
         };
       });
     }
 
     // Default 'Bugun' view:
-    const sortedToday = [...todaySalesList].sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+    const sortedToday = [...todayCashFlowEntries].sort((a, b) => (a.time || '').localeCompare(b.time || ''));
 
     if (sortedToday.length === 0) {
       return [
@@ -237,7 +256,7 @@ export const Dashboard = ({ setActiveTab }) => {
           qty: s.qty,
           seller: s.seller,
           paymentType: s.paymentType,
-          amount: Number(s.total) || 0
+          amount: s.cashAmount
         }
       ];
     }
@@ -250,9 +269,9 @@ export const Dashboard = ({ setActiveTab }) => {
       qty: s.qty,
       seller: s.seller,
       paymentType: s.paymentType,
-      amount: Number(s.total) || 0
+      amount: s.cashAmount
     }));
-  }, [selectedTimeRange, sales, todaySalesList, today]);
+  }, [selectedTimeRange, allCashFlowEntries, todayCashFlowEntries, today]);
 
   // Top products pie/donut data — from real sales aggregation
   const pieData = useMemo(() => {
@@ -346,6 +365,71 @@ export const Dashboard = ({ setActiveTab }) => {
     );
   }, [activities, isOwner, currentUserName, currentUserId]);
 
+  // Real alerts calculated dynamically from actual products, debts, and orders
+  const realAlerts = useMemo(() => {
+    const list = [];
+    (products || []).forEach(p => {
+      if (p.stock === 0 || p.status === 'Tugagan') {
+        list.push({
+          id: `alert-stock-out-${p.id}`,
+          dotColor: 'bg-rose-500',
+          dotText: '!',
+          title: `${p.name} — omborda tugagan`,
+          subtitle: 'Zaxira 0 dona',
+          subtitleColor: 'text-rose-500'
+        });
+      } else if (p.stock <= 5 || p.status === 'Kam') {
+        list.push({
+          id: `alert-stock-low-${p.id}`,
+          dotColor: 'bg-amber-500',
+          dotText: '!',
+          title: `${p.name} — ${p.stock} ${p.unit || 'dona'} qoldi`,
+          subtitle: 'Kam miqdorda',
+          subtitleColor: 'text-amber-500'
+        });
+      }
+    });
+
+    (debts || []).forEach(d => {
+      if (!d.isPaid && (Number(d.amount) || 0) > 0) {
+        if (d.status === 'Kechikkan' || (d.dueDate && d.dueDate < today)) {
+          list.push({
+            id: `alert-debt-overdue-${d.id}`,
+            dotColor: 'bg-rose-500',
+            dotText: 'Q',
+            title: `${d.name} — ${(Number(d.amount) || 0).toLocaleString()} so‘m qarz`,
+            subtitle: 'Muddati kechikkan',
+            subtitleColor: 'text-rose-500'
+          });
+        } else if (d.status === 'Bugun to‘lanishi kerak' || d.dueDate === today) {
+          list.push({
+            id: `alert-debt-today-${d.id}`,
+            dotColor: 'bg-amber-500',
+            dotText: 'Q',
+            title: `${d.name} — ${(Number(d.amount) || 0).toLocaleString()} so‘m qarz`,
+            subtitle: 'Bugun to‘lanishi kerak',
+            subtitleColor: 'text-amber-600'
+          });
+        }
+      }
+    });
+
+    (orders || []).forEach(o => {
+      if (o.status === "Hali yo‘lda" || o.status === "Hali yo'lda") {
+        list.push({
+          id: `alert-order-${o.id}`,
+          dotColor: 'bg-blue-500',
+          dotText: 'B',
+          title: `${o.product || 'Buyurtma'} — yo‘lda`,
+          subtitle: `Yetkazuvchi: ${o.supplier || o.customerName || 'Ta’minotchi'}`,
+          subtitleColor: 'text-blue-500'
+        });
+      }
+    });
+
+    return list.slice(0, 4);
+  }, [products, debts, orders, today]);
+
   return (
     <div className="space-y-6 sm:space-y-8 pb-16 font-sans select-none max-w-[1600px] mx-auto">
       {/* Welcome Greeting Banner Header */}
@@ -356,7 +440,7 @@ export const Dashboard = ({ setActiveTab }) => {
           </div>
           <div>
             <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
-              <span>{t('greetingMorning', 'Xayrli kun')}, {userName}! 👋</span>
+              <span>{t('greetingMorning', 'Xayrli kun')}, {userName}!</span>
             </h1>
             <p className="text-xs font-medium text-slate-400 mt-1">
               Do‘koningizning asosiy ko‘rsatkichlarini bir joyda kuzating.
@@ -388,9 +472,25 @@ export const Dashboard = ({ setActiveTab }) => {
         <StatCard
           title={selectedTimeRange === 'Barchasi' ? t('allSales', 'BARCHA SAVDO') : t('todaySales', 'BUGUNGI SAVDO')}
           value={`${displaySalesAmount.toLocaleString()} ${t('sum', 'so\u2018m')}`}
-          badgeText={selectedTimeRange === 'Barchasi' ? `${allSalesCount} ta savdo` : `${Number(salesGrowthPct) >= 0 ? '+' : ''}${salesGrowthPct}% ${t('moreThanYesterday', 'kechagidan')}`}
+          badgeText={
+            selectedTimeRange === 'Barchasi'
+              ? `${allCashCount} ta savdo`
+              : salesGrowthMetrics.isNew
+              ? 'Yangi'
+              : salesGrowthMetrics.formattedPercent
+          }
+          trend={
+            selectedTimeRange === 'Barchasi'
+              ? 'neutral'
+              : salesGrowthMetrics.isPositive
+              ? 'up'
+              : salesGrowthMetrics.isNegative
+              ? 'down'
+              : 'neutral'
+          }
           type="sales"
           sparklineColor="#10B981"
+          sparklineData={salesChartData.length > 0 && displaySalesAmount > 0 ? salesChartData.map(d => ({ v: d.amount })) : [{ v: 0 }, { v: 0 }]}
         />
         <StatCard
           title={t('inventoryStatus', 'OMBOR HOLATI')}
@@ -398,25 +498,45 @@ export const Dashboard = ({ setActiveTab }) => {
           subtext={t('productsWord', 'mahsulot')}
           linkText={t('viewInventory', 'Omborni ko‘rish →')}
           type="inventory"
-          sparklineColor="#3B82F6"
+          showChart={false}
           onAction={() => setActiveTab && setActiveTab('inventory')}
         />
-        <StatCard
-          title={t('totalDebts', 'JAMI QARZ')}
-          value={`${(stats.totalDebtsAmount ?? 0).toLocaleString()} ${t('sum', 'so‘m')}`}
-          subtext={`${stats.activeDebtsCount ?? 0} ${t('activeClients', 'faol mijoz')}`}
-          linkText={isDebtsAllowed ? t('viewDebts', 'Qarzlarni ko‘rish →') : undefined}
-          type="debt"
-          sparklineColor="#F59E0B"
-          onAction={isDebtsAllowed ? () => setActiveTab && setActiveTab('debtors') : undefined}
-        />
+        {isDebtsAllowed ? (
+          <StatCard
+            title={t('totalDebts', 'JAMI QARZ')}
+            value={`${(stats.totalDebtsAmount ?? 0).toLocaleString()} ${t('sum', 'so‘m')}`}
+            subtext={`${stats.activeDebtsCount ?? 0} ${t('activeClients', 'faol mijoz')}`}
+            linkText={t('viewDebts', 'Qarzlarni ko‘rish →')}
+            type="debt"
+            showChart={false}
+            onAction={() => setActiveTab && setActiveTab('debtors')}
+          />
+        ) : isInstallmentAllowed ? (
+          <StatCard
+            title={t('navInstallments', 'MUDDATLI TO‘LOV QOLDIQ')}
+            value={`${((installmentStats?.remainingTotalSum) ?? 0).toLocaleString()} ${t('sum', 'so‘m')}`}
+            subtext={`${installmentStats?.activeContracts ?? 0} faol shartnoma`}
+            linkText={t('viewInstallments', 'Muddatli to‘lovni ko‘rish →')}
+            type="debt"
+            showChart={false}
+            onAction={() => setActiveTab && setActiveTab('installments')}
+          />
+        ) : (
+          <StatCard
+            title={t('totalDebts', 'JAMI QARZ')}
+            value={`0 ${t('sum', 'so‘m')}`}
+            subtext="Mavjud emas"
+            type="debt"
+            showChart={false}
+          />
+        )}
         <StatCard
           title={t('ordersTitle', 'BUYURTMALAR')}
           value={`${stats.pendingOrdersCount || orders.length} ${t('itemsUnit', 'ta')}`}
           subtext={t('waitingOrders', 'kutilmoqda')}
           linkText={t('viewOrders', 'Buyurtmalarni ko‘rish →')}
           type="orders"
-          sparklineColor="#8B5CF6"
+          showChart={false}
           onAction={() => setActiveTab && setActiveTab('orders')}
         />
       </div>
@@ -441,27 +561,33 @@ export const Dashboard = ({ setActiveTab }) => {
             </div>
 
             <div className="mt-3.5 space-y-2.5">
-              {products.slice(0, 5).map((p) => (
-                <div
-                  key={p.id}
-                  className="flex items-center justify-between p-2.5 rounded-2xl hover:bg-slate-50 transition-colors"
-                >
-                  <div className="flex items-center space-x-3 truncate">
-                    <div className="w-9 h-9 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
-                      <Package className="w-4 h-4 text-slate-600" />
-                    </div>
-                    <div className="truncate">
-                      <div className="text-xs font-extrabold text-slate-900 truncate max-w-[140px]">{p.name}</div>
-                      <div className="text-[11px] text-slate-400 font-semibold">
-                        {p.stock} {p.unit || t('unitPiece', 'dona')}
+              {products.length === 0 ? (
+                <div className="text-xs text-slate-400 text-center py-6">
+                  {t('noProductsYet', 'Hozircha mahsulotlar mavjud emas')}
+                </div>
+              ) : (
+                products.slice(0, 5).map((p) => (
+                  <div
+                    key={p.id}
+                    className="flex items-center justify-between p-2.5 rounded-2xl hover:bg-slate-50 transition-colors"
+                  >
+                    <div className="flex items-center space-x-3 truncate">
+                      <div className="w-9 h-9 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
+                        <Package className="w-4 h-4 text-slate-600" />
+                      </div>
+                      <div className="truncate">
+                        <div className="text-xs font-extrabold text-slate-900 truncate max-w-[140px]">{p.name}</div>
+                        <div className="text-[11px] text-slate-400 font-semibold">
+                          {p.stock} {p.unit || t('unitPiece', 'dona')}
+                        </div>
                       </div>
                     </div>
+                    <span className={`text-[11px] font-extrabold px-3 py-1 rounded-xl shrink-0 ${getStatusBadge(p.status)}`}>
+                      {getStatusLabel(p.status)}
+                    </span>
                   </div>
-                  <span className={`text-[11px] font-extrabold px-3 py-1 rounded-xl shrink-0 ${getStatusBadge(p.status)}`}>
-                    {getStatusLabel(p.status)}
-                  </span>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
         </div>
@@ -477,19 +603,25 @@ export const Dashboard = ({ setActiveTab }) => {
             </div>
 
             <div className="mt-3.5 space-y-3.5">
-              {storeConfig.sampleAlerts?.map((a) => (
-                <div key={a.id} className="flex items-start space-x-3 p-1">
-                  <div
-                    className={`w-4 h-4 rounded-full ${a.dotColor} mt-0.5 shrink-0 flex items-center justify-center text-[9px] text-white font-black`}
-                  >
-                    {a.dotText || '!'}
-                  </div>
-                  <div>
-                    <div className="text-xs font-bold text-slate-800 leading-snug">{a.title}</div>
-                    <div className={`text-[11px] font-semibold mt-0.5 ${a.subtitleColor}`}>{a.subtitle}</div>
-                  </div>
+              {realAlerts.length === 0 ? (
+                <div className="text-xs text-slate-400 text-center py-6">
+                  {t('noAlerts', 'Hozircha e’tibor talab qiladigan holatlar yo‘q')}
                 </div>
-              ))}
+              ) : (
+                realAlerts.map((a) => (
+                  <div key={a.id} className="flex items-start space-x-3 p-1">
+                    <div
+                      className={`w-4 h-4 rounded-full ${a.dotColor} mt-0.5 shrink-0 flex items-center justify-center text-[9px] text-white font-black`}
+                    >
+                      {a.dotText || '!'}
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-slate-800 leading-snug">{a.title}</div>
+                      <div className={`text-[11px] font-semibold mt-0.5 ${a.subtitleColor}`}>{a.subtitle}</div>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>
@@ -504,11 +636,15 @@ export const Dashboard = ({ setActiveTab }) => {
               </h3>
               <button
                 type="button"
-                onClick={() => setIsTodaySalesExpanded(prev => !prev)}
-                className={`text-xs font-bold px-3 py-1 active:scale-95 rounded-xl transition-all cursor-pointer shadow-xs flex items-center gap-1 ${
+                onClick={() => {
+                  const next = !isTodaySalesExpanded;
+                  setIsTodaySalesExpanded(next);
+                  setSelectedTimeRange(next ? 'Barchasi' : 'Bugun');
+                }}
+                className={`btn-pill-base text-xs font-bold px-3 py-1 rounded-xl ${
                   isTodaySalesExpanded
-                    ? 'bg-emerald-600 text-white border border-emerald-600 shadow-emerald-600/20'
-                    : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200/80'
+                    ? 'btn-pill-emerald font-black'
+                    : 'btn-pill-inactive text-emerald-700 dark:text-emerald-300'
                 }`}
               >
                 <span>{isTodaySalesExpanded ? "Qisqartirish" : t('all', 'Barchasi')}</span>
@@ -537,9 +673,7 @@ export const Dashboard = ({ setActiveTab }) => {
                     fontSize={9}
                     tickLine={false}
                     axisLine={false}
-                    tickFormatter={(val) =>
-                      val >= 1000000 ? `${val / 1000000}M` : val >= 1000 ? `${val / 1000}k` : val
-                    }
+                    tickFormatter={formatChartAxisNumber}
                   />
                   <Tooltip content={<CustomChartTooltip />} />
                   <Area
@@ -581,8 +715,9 @@ export const Dashboard = ({ setActiveTab }) => {
               </div>
             </div>
             <button
-              onClick={() => setIsTodaySalesExpanded(false)}
-              className="self-end sm:self-center px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
+              type="button"
+              onClick={() => { setIsTodaySalesExpanded(false); setSelectedTimeRange('Bugun'); }}
+              className="btn-pill-base btn-pill-inactive self-end sm:self-center px-3.5 py-1.5 rounded-xl text-xs font-bold"
             >
               <span>Yopish</span>
               <span className="text-sm leading-none">✕</span>
@@ -593,12 +728,12 @@ export const Dashboard = ({ setActiveTab }) => {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* 1. Jami summa */}
             <div className="bg-emerald-50/60 p-4 rounded-2xl border border-emerald-100/80">
-              <span className="text-[11px] font-bold text-emerald-800 uppercase tracking-wider block">Bugungi Jami Savdo</span>
+              <span className="text-[11px] font-bold text-emerald-800 uppercase tracking-wider block">Bugungi Pul Tushumi</span>
               <div className="text-xl sm:text-2xl font-black text-emerald-700 mt-1">
                 {todaySalesAmount.toLocaleString()} <span className="text-xs font-bold">so‘m</span>
               </div>
               <div className="text-[11px] font-semibold text-emerald-600 mt-0.5">
-                {salesGrowthPct}% kechagiga nisbatan
+                {salesGrowthMetrics.formattedPercent} kechagiga nisbatan
               </div>
             </div>
 
@@ -662,7 +797,7 @@ export const Dashboard = ({ setActiveTab }) => {
                     fontWeight={600}
                     tickLine={false}
                     axisLine={false}
-                    tickFormatter={(val) => val >= 1000000 ? `${(val / 1000000).toFixed(1)}M` : val >= 1000 ? `${Math.round(val / 1000)}k` : val}
+                    tickFormatter={formatChartAxisNumber}
                   />
                   <Tooltip content={<CustomChartTooltip />} />
                   <Area
@@ -789,19 +924,34 @@ export const Dashboard = ({ setActiveTab }) => {
                 </div>
               </button>
 
-              {/* Tile 2: Qarz qo'shish */}
-              <button
-                onClick={() => setQuickModalType('debt')}
-                className="bg-blue-50/80 hover:bg-blue-100 p-4 rounded-2xl text-center border border-blue-100 transition-all group flex flex-col items-center justify-center space-y-2 cursor-pointer"
-              >
-                <div className="w-11 h-11 rounded-2xl bg-blue-500 text-white flex items-center justify-center shadow-md shadow-blue-500/20 group-hover:scale-105 transition-transform">
-                  <UserPlus className="w-5 h-5 stroke-[2.2]" />
-                </div>
-                <div>
-                  <div className="text-xs font-black text-slate-900">{t('addDebtAction', 'Qarz qo‘shish')}</div>
-                  <div className="text-[10px] font-semibold text-blue-600">{t('addDebtSubtitle', 'Qarz kiritish')}</div>
-                </div>
-              </button>
+              {/* Tile 2: Qarz qo'shish / Muddatli to'lov */}
+              {isDebtsAllowed ? (
+                <button
+                  onClick={() => setQuickModalType('debt')}
+                  className="bg-blue-50/80 hover:bg-blue-100 p-4 rounded-2xl text-center border border-blue-100 transition-all group flex flex-col items-center justify-center space-y-2 cursor-pointer"
+                >
+                  <div className="w-11 h-11 rounded-2xl bg-blue-500 text-white flex items-center justify-center shadow-md shadow-blue-500/20 group-hover:scale-105 transition-transform">
+                    <UserPlus className="w-5 h-5 stroke-[2.2]" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-black text-slate-900">{t('addDebtAction', 'Qarz qo‘shish')}</div>
+                    <div className="text-[10px] font-semibold text-blue-600">{t('addDebtSubtitle', 'Qarz kiritish')}</div>
+                  </div>
+                </button>
+              ) : isInstallmentAllowed ? (
+                <button
+                  onClick={() => setActiveTab && setActiveTab('installments')}
+                  className="bg-blue-50/80 hover:bg-blue-100 p-4 rounded-2xl text-center border border-blue-100 transition-all group flex flex-col items-center justify-center space-y-2 cursor-pointer"
+                >
+                  <div className="w-11 h-11 rounded-2xl bg-blue-500 text-white flex items-center justify-center shadow-md shadow-blue-500/20 group-hover:scale-105 transition-transform">
+                    <Wallet className="w-5 h-5 stroke-[2.2]" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-black text-slate-900">{t('navInstallments', 'Muddatli to‘lov')}</div>
+                    <div className="text-[10px] font-semibold text-blue-600">Bo‘lib to‘lash</div>
+                  </div>
+                </button>
+              ) : null}
 
               {/* Tile 3: Mahsulot qo'shish */}
               <button

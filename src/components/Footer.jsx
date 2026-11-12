@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useLanguage } from '../context/LanguageContext';
 import { ShoppingBag, Phone, Mail, MapPin, Heart, ShieldCheck, Truck, Headphones, ArrowRight } from 'lucide-react';
+import { SavatchiLogo } from './SavatchiLogo';
 
 export const Footer = () => {
   const { t, tCategory } = useLanguage();
@@ -13,8 +14,8 @@ export const Footer = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-10 grid grid-cols-1 md:grid-cols-4 gap-8 border-b border-slate-800">
         <div className="space-y-4">
           <div className="flex items-center space-x-3">
-            <div className="w-9 h-9 rounded-xl bg-emerald-500 flex items-center justify-center text-white font-bold">
-              <ShoppingBag className="w-5 h-5" />
+            <div className="w-9 h-9 rounded-xl bg-white p-0.5 flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
+              <SavatchiLogo theme="dark" className="w-full h-full object-contain" />
             </div>
             <span className="text-xl font-black text-white tracking-tight">SAVATCHI.UZ</span>
           </div>

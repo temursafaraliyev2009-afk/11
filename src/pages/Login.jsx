@@ -17,6 +17,7 @@ import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { useToast } from '../context/ToastContext';
 import { BackgroundWaves } from '../components/BackgroundWaves';
+import { SavatchiLogo } from '../components/SavatchiLogo';
 
 export const Login = ({ onLoginSuccess }) => {
   const { loginWithEmail, registerWithEmail, loading } = useAuth();
@@ -121,10 +122,8 @@ export const Login = ({ onLoginSuccess }) => {
       {/* Top Navbar */}
       <header className="relative z-10 px-6 lg:px-12 py-5 flex items-center justify-between border-b border-slate-200/60 bg-white/70 backdrop-blur-md">
         <div className="flex items-center space-x-3.5">
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-blue-600 via-indigo-500 to-purple-500 p-0.5 shadow-lg shadow-blue-500/25 flex items-center justify-center shrink-0">
-            <div className="w-full h-full bg-[#0B132B] rounded-[14px] flex items-center justify-center">
-              <ShoppingBag className="w-5 h-5 text-blue-400" />
-            </div>
+          <div className="w-11 h-11 rounded-2xl bg-white p-0.5 shadow-lg shadow-blue-500/10 flex items-center justify-center shrink-0 border border-slate-100 overflow-hidden">
+            <SavatchiLogo className="w-full h-full object-contain" />
           </div>
           <div>
             <h1 className="text-xl font-black tracking-tight text-slate-900 leading-none">
@@ -145,10 +144,8 @@ export const Login = ({ onLoginSuccess }) => {
 
           {/* Header */}
           <div className="text-center space-y-2">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-blue-600 via-indigo-500 to-purple-500 p-0.5 shadow-lg shadow-blue-500/25 flex items-center justify-center mx-auto mb-4">
-              <div className="w-full h-full bg-[#0B132B] rounded-[14px] flex items-center justify-center">
-                <ShoppingBag className="w-7 h-7 text-blue-400" />
-              </div>
+            <div className="w-14 h-14 rounded-2xl bg-white p-1 shadow-lg shadow-blue-500/10 flex items-center justify-center mx-auto mb-4 border border-slate-100 overflow-hidden">
+              <SavatchiLogo className="w-full h-full object-contain" />
             </div>
             <h2 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
               {mode === 'login'
@@ -444,21 +441,8 @@ export const Login = ({ onLoginSuccess }) => {
               </p>
             </form>
           )}
-
-          {/* Supabase Badge */}
-          <div className="flex items-center justify-center space-x-2 pt-2 border-t border-slate-100">
-            <svg className="w-4 h-4 text-emerald-600" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M11.9 1.036c-.015-.986-1.26-1.41-1.874-.637L.764 12.05C.161 12.887.746 14 1.79 14h8.018l.174 8.964c.015.986 1.26 1.41 1.874.637l9.262-11.651c.603-.837.018-1.95-1.026-1.95h-8.018L11.9 1.036z"/>
-            </svg>
-            <span className="text-[10px] text-slate-400 font-bold">Powered by Supabase</span>
-          </div>
         </div>
       </main>
-
-      {/* Footer */}
-      <footer className="relative z-10 text-center py-4 text-xs text-slate-400 font-medium">
-        {t('copyright', '© 2025 Savatchi · Barcha huquqlar himoyalangan')}
-      </footer>
     </div>
   );
 };

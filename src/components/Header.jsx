@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { MailboxModal } from './MailboxModal';
+import { SavatchiLogo } from './SavatchiLogo';
 import { getPendingInvitationsCount } from '../services/mailService';
 
 export const Header = ({ searchQuery, setSearchQuery, onSelectCategory }) => {
@@ -231,8 +232,8 @@ export const Header = ({ searchQuery, setSearchQuery, onSelectCategory }) => {
         <div className="flex items-center justify-between gap-4">
           {/* Logo */}
           <Link to="/store/" className="flex items-center space-x-3 group">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-600 via-emerald-500 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/25 group-hover:scale-105 transition-transform duration-300">
-              <ShoppingBag className="w-5 h-5 text-white" />
+            <div className="w-10 h-10 rounded-2xl bg-white p-0.5 shadow-lg shadow-slate-900/10 border border-slate-100 dark:border-slate-800 flex items-center justify-center group-hover:scale-105 transition-transform duration-300 overflow-hidden shrink-0">
+              <SavatchiLogo className="w-full h-full object-contain" />
             </div>
             <div>
               <span className="text-2xl font-extrabold tracking-tight gradient-text">

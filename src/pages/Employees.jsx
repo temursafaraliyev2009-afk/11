@@ -25,6 +25,7 @@ import { useLanguage } from '../context/LanguageContext';
 import { useToast } from '../context/ToastContext';
 import {
   findAccountByIdentifier,
+  findAccountByIdentifierAsync,
   isAccountAlreadyEmployee,
   getAllRegisteredAccounts,
   isAccountStoreOwner
@@ -47,10 +48,12 @@ export const Employees = () => {
     setSearchTargetItem,
     isEmployee,
     isOwner,
-    isUnassigned
+    isUnassigned,
+    isItemPendingDelete,
+    setItemPendingDelete
   } = useStore();
   const { t } = useLanguage();
-  const { notifySuccess, notifyDelete, notifyError, notifyInfo } = useToast();
+  const { notifySuccess, notifyDelete, notifyError, notifyInfo, showUndoDelete } = useToast();
 
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -83,6 +86,7 @@ export const Employees = () => {
   const displayEmployees = useMemo(() => {
     return employees
       .filter((emp) => {
+        if (isItemPendingDelete(emp.id)) return false;
         const isOwnerHimself =
           (currentStore?.ownerId && (emp.accountId === currentStore.ownerId || emp.userId === currentStore.ownerId || emp.id === currentStore.ownerId)) ||
           (currentStore?.ownerEmail && emp.email && emp.email.trim().toLowerCase() === currentStore.ownerEmail.trim().toLowerCase()) ||
@@ -96,22 +100,41 @@ export const Employees = () => {
         }
         return emp;
       });
-  }, [employees, currentStore, user]);
+  }, [employees, currentStore, user, isItemPendingDelete]);
 
   const MAX_SLOTS = 7;
   const currentCount = displayEmployees.length;
   const availableSlots = MAX_SLOTS - currentCount;
 
+  const [accountsVersion, setAccountsVersion] = useState(0);
+
+  useEffect(() => {
+    const handleAccountsUpdate = () => {
+      setAccountsVersion((v) => v + 1);
+    };
+    window.addEventListener('savatchi_account_registered', handleAccountsUpdate);
+    window.addEventListener('storage', handleAccountsUpdate);
+    return () => {
+      window.removeEventListener('savatchi_account_registered', handleAccountsUpdate);
+      window.removeEventListener('storage', handleAccountsUpdate);
+    };
+  }, []);
+
   // Mavjud barcha ro'yxatdan o'tgan akkauntlar
-  const allAccounts = getAllRegisteredAccounts();
-  const candidateAccounts = allAccounts.filter((acc) => {
-    if (isAccountAlreadyEmployee(acc, displayEmployees)) return false;
-    const accEmail = (acc.email || '').trim().toLowerCase();
-    const uEmail = (user?.email || '').trim().toLowerCase();
-    if (accEmail && uEmail && accEmail === uEmail) return false;
-    if (isAccountStoreOwner(acc)) return false;
-    return true;
-  });
+  const allAccounts = useMemo(() => {
+    return getAllRegisteredAccounts();
+  }, [accountsVersion]);
+
+  const candidateAccounts = useMemo(() => {
+    return allAccounts.filter((acc) => {
+      if (isAccountAlreadyEmployee(acc, displayEmployees)) return false;
+      const accEmail = (acc.email || '').trim().toLowerCase();
+      const uEmail = (user?.email || '').trim().toLowerCase();
+      if (accEmail && uEmail && accEmail === uEmail) return false;
+      if (isAccountStoreOwner(acc)) return false;
+      return true;
+    });
+  }, [allAccounts, displayEmployees, user]);
 
   const loadPendingInvitations = () => {
     if (!currentStore?.id) return;
@@ -146,7 +169,7 @@ export const Employees = () => {
     setHasPendingInvite(false);
   };
 
-  const handlePerformSearch = (explicitQuery) => {
+  const handlePerformSearch = async (explicitQuery) => {
     const q = (explicitQuery !== undefined ? explicitQuery : searchQuery).trim();
     if (!q) {
       setFoundAccount(null);
@@ -161,7 +184,18 @@ export const Employees = () => {
       return null;
     }
 
-    const account = findAccountByIdentifier(q);
+    // 1. Avval mahalliy keshdan sinxron qidirish (tezkor javob)
+    let account = findAccountByIdentifier(q);
+
+    // 2. Agar mahalliy keshda topilmasa, Supabase clouddan qidirish (multi-device)
+    if (!account) {
+      try {
+        account = await findAccountByIdentifierAsync(q);
+      } catch (e) {
+        // Cloud xatolik bo'lsa, sinxron qidiruv natijasiga qaytamiz
+      }
+    }
+
     if (!account) {
       setFoundAccount(null);
       setIsAlreadyStaff(false);
@@ -229,13 +263,13 @@ export const Employees = () => {
   /**
    * Admin xodimlik taklifini yuboradi (Talab 2)
    */
-  const handleSendInvitationSubmit = (e) => {
+  const handleSendInvitationSubmit = async (e) => {
     e.preventDefault();
     setSearchError('');
 
     let account = foundAccount;
     if (!account) {
-      account = handlePerformSearch();
+      account = await handlePerformSearch();
       if (!account) return;
     }
 
@@ -390,11 +424,10 @@ export const Employees = () => {
             setIsAddOpen(true);
           }}
           disabled={availableSlots <= 0 || !isOwner}
-          className={`font-extrabold text-xs sm:text-sm py-3.5 px-6 rounded-2xl shadow-lg flex items-center justify-center space-x-2 transition-all ${
-            availableSlots > 0 && isOwner
+          className={`font-extrabold text-xs sm:text-sm py-3.5 px-6 rounded-2xl shadow-lg flex items-center justify-center space-x-2 transition-all ${availableSlots > 0 && isOwner
               ? 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-blue-600/25 active:scale-[0.98] cursor-pointer'
               : 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
-          }`}
+            }`}
           title={!isOwner ? "Xodim qo‘shish faqat do‘kon egasi uchun ruxsat etilgan" : undefined}
         >
           <Plus className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.5]" />
@@ -434,9 +467,8 @@ export const Employees = () => {
           {Array.from({ length: MAX_SLOTS }).map((_, index) => (
             <div
               key={index}
-              className={`h-3 w-8 sm:w-10 rounded-full transition-all ${
-                index < currentCount ? 'bg-blue-600' : 'bg-slate-100'
-              }`}
+              className={`h-3 w-8 sm:w-10 rounded-full transition-all ${index < currentCount ? 'bg-blue-600' : 'bg-slate-100'
+                }`}
             />
           ))}
           <span className="text-xs font-bold text-slate-600 pl-2">
@@ -527,9 +559,8 @@ export const Employees = () => {
                   handleOpenStaffDetails(emp);
                 }
               }}
-              className={`bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs transition-all flex flex-col justify-between group relative overflow-hidden ${
-                isOwner ? 'hover:shadow-md hover:border-blue-300 cursor-pointer' : 'cursor-default'
-              }`}
+              className={`bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs transition-all flex flex-col justify-between group relative overflow-hidden ${isOwner ? 'hover:shadow-md hover:border-blue-300 cursor-pointer' : 'cursor-default'
+                }`}
               title={isOwner ? "Xodim ma’lumotlari va rolini o‘zgartirish uchun bosing" : undefined}
             >
               <div className="flex items-start justify-between">
@@ -628,16 +659,14 @@ export const Employees = () => {
               {/* Error / Warning Banner */}
               {searchError && (
                 <div
-                  className={`p-3.5 rounded-2xl text-xs font-bold flex items-start space-x-2.5 animate-in fade-in duration-150 ${
-                    isAlreadyStaff || hasPendingInvite
+                  className={`p-3.5 rounded-2xl text-xs font-bold flex items-start space-x-2.5 animate-in fade-in duration-150 ${isAlreadyStaff || hasPendingInvite
                       ? 'bg-amber-50 border border-amber-200 text-amber-800'
                       : 'bg-rose-50 border border-rose-200 text-rose-700'
-                  }`}
+                    }`}
                 >
                   <AlertCircle
-                    className={`w-4 h-4 shrink-0 mt-0.5 ${
-                      isAlreadyStaff || hasPendingInvite ? 'text-amber-600' : 'text-rose-600'
-                    }`}
+                    className={`w-4 h-4 shrink-0 mt-0.5 ${isAlreadyStaff || hasPendingInvite ? 'text-amber-600' : 'text-rose-600'
+                      }`}
                   />
                   <span className="leading-relaxed">{searchError}</span>
                 </div>
@@ -732,9 +761,8 @@ export const Employees = () => {
 
                     <div className="flex items-center space-x-3">
                       <div
-                        className={`w-11 h-11 rounded-2xl ${
-                          foundAccount.bg || 'bg-blue-600'
-                        } text-white font-black text-sm flex items-center justify-center shadow-md shadow-blue-600/20 shrink-0 overflow-hidden`}
+                        className={`w-11 h-11 rounded-2xl ${foundAccount.bg || 'bg-blue-600'
+                          } text-white font-black text-sm flex items-center justify-center shadow-md shadow-blue-600/20 shrink-0 overflow-hidden`}
                       >
                         {foundAccount.photoURL ? (
                           <img
@@ -795,11 +823,10 @@ export const Employees = () => {
                   <button
                     type="submit"
                     disabled={!foundAccount || isAlreadyStaff || hasPendingInvite || availableSlots <= 0}
-                    className={`flex-1 py-3 rounded-2xl font-extrabold text-xs transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
-                      foundAccount && !isAlreadyStaff && !hasPendingInvite && availableSlots > 0
+                    className={`flex-1 py-3 rounded-2xl font-extrabold text-xs transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${foundAccount && !isAlreadyStaff && !hasPendingInvite && availableSlots > 0
                         ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-600/25 active:scale-[0.98]'
                         : 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
-                    }`}
+                      }`}
                   >
                     <Send className="w-3.5 h-3.5" />
                     <span>Xodimlik taklifini yuborish</span>
@@ -843,9 +870,8 @@ export const Employees = () => {
               {/* Staff Profile Card */}
               <div className="flex items-center space-x-3.5 p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
                 <div
-                  className={`w-12 h-12 rounded-2xl ${
-                    selectedStaffForEdit.bg || 'bg-blue-600'
-                  } text-white font-black text-sm flex items-center justify-center shadow-md shrink-0 overflow-hidden`}
+                  className={`w-12 h-12 rounded-2xl ${selectedStaffForEdit.bg || 'bg-blue-600'
+                    } text-white font-black text-sm flex items-center justify-center shadow-md shrink-0 overflow-hidden`}
                 >
                   {selectedStaffForEdit.photoURL ? (
                     <img
@@ -945,9 +971,31 @@ export const Employees = () => {
                 <button
                   type="button"
                   onClick={() => {
-                    deleteEmployee(deletingStaff.id);
-                    notifyDelete(t('staffDeletedTitle', 'Xodim o‘chirildi'), `${deletingStaff.name} tizimdan muvaffaqiyatli olib tashlandi.`);
+                    const targetStaff = deletingStaff;
                     setDeletingStaff(null);
+                    if (!targetStaff || isItemPendingDelete(targetStaff.id)) return;
+
+                    // 1. Vaqtincha interfeysdan yashirish (bazaga tegilmaydi)
+                    setItemPendingDelete(targetStaff.id, true);
+
+                    // 2. 5 soniyalik bekor qilish bildirishnomasini ko'rsatish
+                    showUndoDelete({
+                      title: 'Xodim o‘chirilmoqda...',
+                      seconds: 5,
+                      successMessage: 'Xodim muvaffaqiyatli o‘chirildi.',
+                      onUndo: () => {
+                        setItemPendingDelete(targetStaff.id, false);
+                      },
+                      onCommit: async () => {
+                        try {
+                          await deleteEmployee(targetStaff.id);
+                          setItemPendingDelete(targetStaff.id, false);
+                        } catch (err) {
+                          setItemPendingDelete(targetStaff.id, false);
+                          throw err;
+                        }
+                      }
+                    });
                   }}
                   className="flex-1 py-3 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-lg shadow-rose-600/25 transition-all cursor-pointer"
                 >

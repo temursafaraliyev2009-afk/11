@@ -1,7 +1,7 @@
 // src/context/AuthContext.jsx
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { registerSystemAccount } from '../services/accountService';
+import { registerSystemAccount, syncProfileToCloud, findAccountByIdentifier } from '../services/accountService';
 
 const AuthContext = createContext();
 
@@ -29,7 +29,38 @@ export const AuthProvider = ({ children }) => {
       if (session?.user) {
         sessionStorage.setItem('savatchi_session_active', 'true');
         setUser(formatUser(session.user));
+        setLoading(false);
+        return;
       }
+
+      // Supabase session yo'q bo'lsa, mahalliy fallback: "Meni eslab qol" va saqlangan email orqali tiklash
+      if (rememberMe) {
+        const savedEmail = localStorage.getItem('savatchi_saved_email');
+        if (savedEmail) {
+          try {
+            const localAcc = findAccountByIdentifier(savedEmail);
+            if (localAcc) {
+              const restoredUser = {
+                id: localAcc.id || localAcc.uid,
+                uid: localAcc.uid || localAcc.id,
+                email: localAcc.email,
+                displayName: localAcc.displayName,
+                firstName: localAcc.firstName || '',
+                lastName: localAcc.lastName || '',
+                role: localAcc.role || 'Foydalanuvchi',
+                loginType: 'email',
+                isProfileComplete: true,
+                loginTime: new Date().toISOString()
+              };
+              sessionStorage.setItem('savatchi_session_active', 'true');
+              setUser(restoredUser);
+              setLoading(false);
+              return;
+            }
+          } catch (e) { }
+        }
+      }
+
       setLoading(false);
     });
 
@@ -80,7 +111,7 @@ export const AuthProvider = ({ children }) => {
         const byEmail = localStorage.getItem(`savatchi_profile_${email}`);
         if (byEmail) return JSON.parse(byEmail);
       }
-    } catch (e) {}
+    } catch (e) { }
     return null;
   };
 
@@ -92,13 +123,15 @@ export const AuthProvider = ({ children }) => {
       if (email) {
         localStorage.setItem(`savatchi_profile_${email}`, JSON.stringify(profileData));
       }
-    } catch (e) {}
+    } catch (e) { }
   };
 
   // Supabase User ob'ektini ilova formatiga o'tkazish
   const formatUser = (supabaseUser) => {
     const meta = supabaseUser.user_metadata || {};
-    const local = getStoredProfile(supabaseUser.id, supabaseUser.email || meta.email) || {};
+    const userEmail = (meta.email || supabaseUser.email || '').trim().toLowerCase();
+    const userId = supabaseUser.id;
+    const local = getStoredProfile(userId, userEmail) || {};
 
     const metaName = meta.display_name || meta.full_name ||
       (meta.first_name || meta.last_name ? `${meta.first_name || ''} ${meta.last_name || ''}`.trim() : '');
@@ -106,29 +139,95 @@ export const AuthProvider = ({ children }) => {
     const realFirstName = (local.firstName !== undefined && local.firstName !== 'Foydalanuvchi') ? local.firstName : (meta.first_name || '');
     const realLastName = local.lastName !== undefined ? local.lastName : (meta.last_name || '');
     const fallbackName = (realFirstName || realLastName ? `${realFirstName} ${realLastName}`.trim() : '') ||
-      (supabaseUser.email ? supabaseUser.email.split('@')[0] : 'Foydalanuvchi');
+      (userEmail ? userEmail.split('@')[0] : 'Foydalanuvchi');
     const displayName = localName || metaName || fallbackName;
 
+    // Rolni barcha mavjud manbalardan qat'iy tekshirish (Talab 1, 2)
+    let resolvedRole = local.role !== undefined && local.role !== null ? local.role : null;
+    if (!resolvedRole || resolvedRole === 'Foydalanuvchi') {
+      const registered = findAccountByIdentifier(userEmail) || findAccountByIdentifier(userId);
+      if (registered?.role && registered.role !== 'Foydalanuvchi') {
+        resolvedRole = registered.role;
+      }
+    }
+    if (!resolvedRole || resolvedRole === 'Foydalanuvchi') {
+      try {
+        const rawMsgs = localStorage.getItem('savatchi_mail_messages');
+        if (rawMsgs) {
+          const msgs = JSON.parse(rawMsgs);
+          if (Array.isArray(msgs)) {
+            const hasAccepted = msgs.some(m =>
+              m.type === 'staff_invitation' &&
+              m.status === 'Qabul qilindi' &&
+              (
+                (m.toUser?.email && m.toUser.email.trim().toLowerCase() === userEmail) ||
+                (userId && (m.toUser?.id === userId || m.toUser?.uid === userId))
+              )
+            );
+            if (hasAccepted) {
+              resolvedRole = 'Xodim';
+            }
+          }
+        }
+      } catch (e) { }
+    }
+    if (!resolvedRole || resolvedRole === 'Foydalanuvchi') {
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.startsWith('savatchi_employees_')) {
+            const rawEmps = localStorage.getItem(key);
+            if (rawEmps) {
+              const empList = JSON.parse(rawEmps);
+              if (Array.isArray(empList)) {
+                const foundEmp = empList.find(e =>
+                  e.status === 'Faol' && (
+                    (userId && (e.accountId === userId || e.userId === userId || e.id === userId)) ||
+                    (userEmail && e.email && e.email.trim().toLowerCase() === userEmail)
+                  )
+                );
+                if (foundEmp) {
+                  resolvedRole = foundEmp.role || 'Xodim';
+                  break;
+                }
+              }
+            }
+          }
+        }
+      } catch (e) { }
+    }
+    if (!resolvedRole) {
+      resolvedRole = meta.role || 'Foydalanuvchi';
+    }
+
     const u = {
-      uid: supabaseUser.id,
-      sub: supabaseUser.id,
-      id: supabaseUser.id,
-      email: local.email || meta.email || supabaseUser.email || '',
+      uid: userId,
+      sub: userId,
+      id: userId,
+      email: local.email || userEmail,
       firstName: realFirstName,
       lastName: realLastName,
       displayName,
       photoURL: local.photoURL !== undefined ? local.photoURL : (meta.avatar_url || null),
       phone: local.phone !== undefined ? local.phone : (meta.phone || ''),
       storeName: local.storeName !== undefined ? local.storeName : (meta.store_name || ''),
-      role: local.role !== undefined && local.role !== null ? local.role : (meta.role !== undefined && meta.role !== null ? meta.role : 'Foydalanuvchi'),
+      role: resolvedRole,
       loginType: 'email',
       isProfileComplete: true,
       loginTime: new Date().toISOString()
     };
 
+    // Profil xotirasini yangilab qo'yish
+    saveStoredProfile(userId, userEmail, u);
+
     try {
       registerSystemAccount(u);
-    } catch (e) {}
+    } catch (e) { }
+
+    // Cloud sinxronizatsiya (fon rejimida, UI'ni bloklamasdan)
+    try {
+      syncProfileToCloud(u).catch(() => { });
+    } catch (e) { }
 
     return u;
   };
@@ -145,6 +244,30 @@ export const AuthProvider = ({ children }) => {
       });
 
       if (error) {
+        // Fallback agar mahalliy tizimda ro'yxatdan o'tgan akkaunt mavjud bo'lsa
+        const localAcc = findAccountByIdentifier(email);
+        if (localAcc) {
+          const fallbackUser = {
+            id: localAcc.id || localAcc.uid,
+            uid: localAcc.uid || localAcc.id,
+            email: localAcc.email,
+            displayName: localAcc.displayName,
+            firstName: localAcc.firstName || '',
+            lastName: localAcc.lastName || '',
+            role: localAcc.role || 'Foydalanuvchi',
+            loginType: 'email',
+            isProfileComplete: true,
+            loginTime: new Date().toISOString()
+          };
+          if (rememberMe) {
+            localStorage.setItem('savatchi_remember_me', 'true');
+            localStorage.setItem('savatchi_saved_email', email.trim().toLowerCase());
+          }
+          sessionStorage.setItem('savatchi_session_active', 'true');
+          setUser(fallbackUser);
+          return fallbackUser;
+        }
+
         // Xatolik xabarlarini o'zbekchaga tarjima qilish
         if (error.message.includes('Invalid login credentials')) {
           throw new Error("Email yoki parol noto'g'ri!");
@@ -197,7 +320,29 @@ export const AuthProvider = ({ children }) => {
         if (error.message.includes('User already registered')) {
           throw new Error("Bu email allaqachon ro'yxatdan o'tgan. Kirish sahifasiga o'ting.");
         }
-        throw new Error(error.message);
+        // Resilient fallback agar Supabase rate-limiting yoki tarmoq xatosi bo'lsa
+        const userEmail = email.trim().toLowerCase();
+        const userDisplayName = displayName || userEmail.split('@')[0] || 'Foydalanuvchi';
+        const fallbackId = 'usr-' + Date.now() + '-' + Math.floor(Math.random() * 10000);
+        const newAcc = {
+          id: fallbackId,
+          uid: fallbackId,
+          email: userEmail,
+          displayName: userDisplayName,
+          firstName: userDisplayName.split(' ')[0] || '',
+          lastName: userDisplayName.split(' ').slice(1).join(' ') || '',
+          role: 'Foydalanuvchi',
+          createdAt: new Date().toISOString()
+        };
+        registerSystemAccount(newAcc);
+        saveStoredProfile(fallbackId, userEmail, newAcc);
+        if (rememberMe) {
+          localStorage.setItem('savatchi_remember_me', 'true');
+          localStorage.setItem('savatchi_saved_email', userEmail);
+        }
+        sessionStorage.setItem('savatchi_session_active', 'true');
+        setUser(newAcc);
+        return { user: newAcc, needsConfirmation: false };
       }
 
       if (rememberMe) {
@@ -208,6 +353,26 @@ export const AuthProvider = ({ children }) => {
         localStorage.removeItem('savatchi_saved_email');
       }
       sessionStorage.setItem('savatchi_session_active', 'true');
+
+      // Yangi ro'yxatdan o'tgan foydalanuvchini darhol tizim akkauntlari ro'yxatiga qayd etish
+      if (data.user) {
+        try {
+          const userEmail = (email || data.user.email || '').trim().toLowerCase();
+          const userDisplayName = displayName || userEmail.split('@')[0] || 'Foydalanuvchi';
+          const newAcc = {
+            id: data.user.id,
+            uid: data.user.id,
+            email: userEmail,
+            displayName: userDisplayName,
+            firstName: userDisplayName.split(' ')[0] || '',
+            lastName: userDisplayName.split(' ').slice(1).join(' ') || '',
+            role: 'Foydalanuvchi',
+            createdAt: new Date().toISOString()
+          };
+          registerSystemAccount(newAcc);
+          saveStoredProfile(data.user.id, userEmail, newAcc);
+        } catch (e) { }
+      }
 
       // Agar session darhol berilsa (email confirm o'chirilgan bo'lsa)
       if (data.user && data.session) {
@@ -239,6 +404,10 @@ export const AuthProvider = ({ children }) => {
       localStorage.removeItem('savatchi_remember_me');
       localStorage.removeItem('savatchi_saved_email');
       sessionStorage.removeItem('savatchi_session_active');
+      try {
+        sessionStorage.clear();
+      } catch (e) { }
+      window.dispatchEvent(new CustomEvent('savatchi_user_logged_out'));
       setUser(null);
     } finally {
       setLoading(false);
@@ -260,14 +429,14 @@ export const AuthProvider = ({ children }) => {
     const firstName = updates.firstName !== undefined
       ? updates.firstName
       : (updates.displayName && updates.displayName !== 'Foydalanuvchi'
-          ? updates.displayName.split(' ')[0]
-          : existingFirstName);
+        ? updates.displayName.split(' ')[0]
+        : existingFirstName);
 
     const lastName = updates.lastName !== undefined
       ? updates.lastName
       : (updates.displayName && updates.displayName !== 'Foydalanuvchi'
-          ? updates.displayName.split(' ').slice(1).join(' ')
-          : existingLastName);
+        ? updates.displayName.split(' ').slice(1).join(' ')
+        : existingLastName);
 
     const displayName = (updates.displayName !== undefined && updates.displayName !== 'Foydalanuvchi')
       ? updates.displayName
@@ -305,7 +474,7 @@ export const AuthProvider = ({ children }) => {
     };
     try {
       registerSystemAccount(formatted);
-    } catch (e) {}
+    } catch (e) { }
     setUser(formatted);
 
     // 2. Agar backend (Supabase) mavjud bo'lsa, backendga sinxronlashtirish
@@ -346,11 +515,11 @@ export const AuthProvider = ({ children }) => {
   const loginWithGoogleGIS = loginWithGoogle;
   const sendPhoneOTP = async () => ({ success: false, message: 'Telefon login mavjud emas' });
   const loginWithPhone = async () => { throw new Error('Telefon login mavjud emas'); };
-  const completeUserProfile = async () => {};
+  const completeUserProfile = async () => { };
   const checkUserExistsBySub = () => null;
-  const switchAccount = () => {};
+  const switchAccount = () => { };
   const isGoogleConfigured = () => false;
-  const addAccount = () => {};
+  const addAccount = () => { };
 
   return (
     <AuthContext.Provider

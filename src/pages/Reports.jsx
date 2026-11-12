@@ -26,12 +26,14 @@ import {
   XAxis,
   YAxis,
   Tooltip,
-  Cell
+  Cell,
+  CartesianGrid,
+  ReferenceLine
 } from 'recharts';
 import { useStore } from '../context/StoreContext';
 import { useLanguage } from '../context/LanguageContext';
 import { getLocalDateString, getOffsetDateString, isToday } from '../utils/dateUtils';
-import { buildPeriodFinancialReports, calculateProductProfitability } from '../utils/financeUtils.js';
+import { buildPeriodFinancialReports, calculateProductProfitability, getSaleFinancials } from '../utils/financeUtils.js';
 
 export const Reports = () => {
   const {
@@ -116,6 +118,77 @@ export const Reports = () => {
   const realProfit = activePeriodData.profit;
   const realMarginPct = activePeriodData.profitMargin;
   const isOverallLoss = activePeriodData.isLoss;
+  const isOverallZero = activePeriodData.isZero ?? (realProfit === 0);
+  const isOverallProfit = activePeriodData.isProfit ?? (realProfit > 0);
+
+  // Real product profitability breakdown for the selected period
+  const periodProductBreakdown = useMemo(() => {
+    const list = activePeriodData?.merchandiseSales || [];
+    if (!Array.isArray(list) || list.length === 0) return [];
+
+    const map = {};
+    list.forEach(s => {
+      const fin = getSaleFinancials(s, products);
+      const name = s.product || s.productName || 'Noma\'lum';
+      if (!map[name]) {
+        const catalogItem = products.find(p => p.name === name || p.id === s.productId);
+        map[name] = {
+          name,
+          category: s.category || catalogItem?.category || 'Asosiy',
+          emoji: s.emoji || catalogItem?.emoji || '📦',
+          unit: s.unit || catalogItem?.unit || 'dona',
+          qty: 0,
+          revenue: 0,
+          cost: 0,
+          profit: 0,
+          hasExactCost: false,
+          hasUnknownCost: false,
+          unitPrices: [],
+          unitCosts: []
+        };
+      }
+      const item = map[name];
+      item.qty += fin.qty;
+      item.revenue += fin.revenue;
+
+      if (fin.costStatus === 'exact') {
+        item.hasExactCost = true;
+        item.cost += (fin.cost || 0);
+        item.profit += (fin.profit || 0);
+        if (fin.unitCost !== null && !item.unitCosts.includes(fin.unitCost)) {
+          item.unitCosts.push(fin.unitCost);
+        }
+      } else {
+        item.hasUnknownCost = true;
+      }
+
+      const uPrice = Number(s.price) || (fin.qty > 0 ? Math.round(fin.revenue / fin.qty) : 0);
+      if (!item.unitPrices.includes(uPrice)) {
+        item.unitPrices.push(uPrice);
+      }
+    });
+
+    return Object.values(map).map(item => {
+      const isKnownCost = item.hasExactCost && !item.hasUnknownCost;
+      const unitPrice = item.unitPrices.length === 1 ? item.unitPrices[0] : Math.round(item.revenue / item.qty);
+      const unitCost = isKnownCost
+        ? (item.unitCosts.length === 1 ? item.unitCosts[0] : Math.round(item.cost / item.qty))
+        : null;
+      const isLoss = isKnownCost && item.profit < 0;
+      const isZero = isKnownCost && item.profit === 0;
+      const margin = isKnownCost && item.revenue > 0 ? ((item.profit / item.revenue) * 100).toFixed(1) : null;
+
+      return {
+        ...item,
+        isKnownCost,
+        unitPrice,
+        unitCost,
+        isLoss,
+        isZero,
+        margin
+      };
+    }).sort((a, b) => b.revenue - a.revenue);
+  }, [activePeriodData, products]);
 
   const getInventoryStatusBadge = (status) => {
     if (status === 'Yetarli') return 'bg-emerald-50 text-emerald-700 border border-emerald-200/80';
@@ -144,8 +217,8 @@ export const Reports = () => {
       totalPrincipal += Number(c.totalAmount || 0);
       totalCollected += Number(c.totalPaid || 0);
       totalRemaining += Math.max(0, Number(c.remainingAmount || 0));
-      const hasOverdue = (c.schedule || []).some(sch => !sch.isPaid && sch.dueDate < todayStr && (sch.amount - (sch.paidAmount || 0)) > 0);
-      if (hasOverdue && c.status !== 'cancelled' && c.status !== 'completed') {
+      const isOverdue = c.status === 'overdue' || (c.schedule || []).some(sch => !sch.isPaid && sch.dueDate < todayStr && (sch.amount - (sch.paidAmount || 0)) > 0);
+      if (isOverdue && c.status !== 'cancelled' && c.status !== 'completed') {
         overdueContracts++;
       }
     });
@@ -201,33 +274,33 @@ export const Reports = () => {
       {/* Tabs and Time Filter Bar */}
       <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4">
         {/* Navigation Tabs */}
-        <div className="flex items-center space-x-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
+        <div className="flex items-center space-x-2 w-full sm:w-auto overflow-x-auto xl:overflow-x-visible py-1.5 px-1 scrollbar-none">
           <button
             onClick={() => setActiveReportTab('sales')}
-            className={`px-4 sm:px-5 py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition-all cursor-pointer whitespace-nowrap ${
+            className={`btn-pill-base px-4 sm:px-5 py-2.5 rounded-2xl text-xs sm:text-sm ${
               activeReportTab === 'sales'
-                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-600/25 font-black'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                ? 'btn-pill-blue font-black'
+                : 'btn-pill-inactive'
             }`}
           >
             {t('tabSalesReport', 'Savdo hisoboti')}
           </button>
           <button
             onClick={() => setActiveReportTab('profit')}
-            className={`px-4 sm:px-5 py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition-all cursor-pointer whitespace-nowrap ${
+            className={`btn-pill-base px-4 sm:px-5 py-2.5 rounded-2xl text-xs sm:text-sm ${
               activeReportTab === 'profit'
-                ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-600/25 font-black'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                ? 'btn-pill-emerald font-black'
+                : 'btn-pill-inactive'
             }`}
           >
             {t('tabProfitReport', 'Foyda va zarar')}
           </button>
           <button
             onClick={() => setActiveReportTab('inventory')}
-            className={`px-4 sm:px-5 py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition-all cursor-pointer whitespace-nowrap ${
+            className={`btn-pill-base px-4 sm:px-5 py-2.5 rounded-2xl text-xs sm:text-sm ${
               activeReportTab === 'inventory'
-                ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md shadow-purple-600/25 font-black'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                ? 'btn-pill-purple font-black'
+                : 'btn-pill-inactive'
             }`}
           >
             {t('tabInventoryReport', 'Ombor hisoboti')}
@@ -235,10 +308,10 @@ export const Reports = () => {
           {isDebtsAllowed && (
             <button
               onClick={() => setActiveReportTab('debt')}
-              className={`px-4 sm:px-5 py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition-all cursor-pointer whitespace-nowrap ${
+              className={`btn-pill-base px-4 sm:px-5 py-2.5 rounded-2xl text-xs sm:text-sm ${
                 activeReportTab === 'debt'
-                  ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-md shadow-amber-500/25 font-black'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  ? 'btn-pill-amber font-black'
+                  : 'btn-pill-inactive'
               }`}
             >
               {t('tabDebtsReport', 'Qarzlar hisoboti')}
@@ -247,10 +320,10 @@ export const Reports = () => {
           {isInstallmentAllowed && (
             <button
               onClick={() => setActiveReportTab('installments')}
-              className={`px-4 sm:px-5 py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition-all cursor-pointer whitespace-nowrap ${
+              className={`btn-pill-base px-4 sm:px-5 py-2.5 rounded-2xl text-xs sm:text-sm ${
                 activeReportTab === 'installments'
-                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-600/25 font-black'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  ? 'btn-pill-blue font-black'
+                  : 'btn-pill-inactive'
               }`}
             >
               {t('navInstallments', 'Muddatli to‘lov hisoboti')}
@@ -260,15 +333,15 @@ export const Reports = () => {
 
         {/* Time Filter Pills (Active for Sales & Profit) */}
         {(activeReportTab === 'sales' || activeReportTab === 'profit') && (
-          <div className="flex items-center space-x-1.5 p-1 bg-slate-50 border border-slate-200/80 rounded-2xl">
+          <div className="flex items-center space-x-1.5 p-1 bg-slate-50 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/80 rounded-2xl">
             {['Bugun', 'Hafta', 'Oy', 'Yil'].map((tf) => (
               <button
                 key={tf}
                 onClick={() => setTimeFilter(tf)}
-                className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+                className={`btn-pill-base px-4 py-2 rounded-xl text-xs font-extrabold ${
                   timeFilter === tf
-                    ? 'bg-white text-slate-900 shadow-sm font-black'
-                    : 'text-slate-500 hover:text-slate-900'
+                    ? 'btn-segment-active font-black'
+                    : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
                 }`}
               >
                 {tf}
@@ -294,10 +367,21 @@ export const Reports = () => {
                 <div className="text-2xl sm:text-[26px] font-black text-slate-900 tracking-tight">
                   {activePeriodData.currentRevenue.toLocaleString()} <span className="text-sm font-bold text-slate-400">{t('sum', 'so‘m')}</span>
                 </div>
-                <div className="text-[11px] font-bold text-emerald-600 flex items-center gap-1 mt-1">
+                <div className={`text-[11px] font-bold flex items-center gap-1 mt-1 ${
+                  activePeriodData.growthMetrics?.isNegative || activePeriodData.growthPct?.startsWith('↓')
+                    ? 'text-rose-600'
+                    : activePeriodData.growthMetrics?.isZero || activePeriodData.growthPct === '0%'
+                    ? 'text-slate-400'
+                    : 'text-emerald-600'
+                }`}>
                   <span>{activePeriodData.growthPct}</span>
                   <span className="text-[10px] text-slate-400 font-medium">{activePeriodData.comparisonText}</span>
                 </div>
+                {activePeriodData.cashReceipts !== activePeriodData.currentRevenue && (
+                  <div className="text-[10px] font-semibold text-slate-400 mt-0.5">
+                    Haqiqiy kassa kirimi: {activePeriodData.cashReceipts.toLocaleString()} so‘m
+                  </div>
+                )}
               </div>
               <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center shadow-lg shadow-blue-600/25 shrink-0 group-hover:scale-105 transition-transform">
                 <Wallet className="w-6 h-6 stroke-[2.2]" />
@@ -305,15 +389,30 @@ export const Reports = () => {
             </div>
 
             {/* Card 2: Yalpi foyda / Yalpi zarar */}
-            <div className={`bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs hover:shadow-md transition-all flex items-center justify-between group ${activePeriodData.isLoss ? 'hover:border-rose-200' : 'hover:border-emerald-200'}`}>
+            <div className={`bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs hover:shadow-md transition-all flex items-center justify-between group ${
+              activePeriodData.isLoss ? 'hover:border-rose-200' : (activePeriodData.isProfit ?? (activePeriodData.profit > 0)) ? 'hover:border-emerald-200' : 'hover:border-slate-300'
+            }`}>
               <div className="space-y-1">
                 <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 block">
-                  {activePeriodData.isLoss ? t('grossLossTitle', 'Yalpi zarar') : t('grossProfitTitle', 'Yalpi foyda')}
+                  {activePeriodData.isLoss ? t('grossLossTitle', 'Yalpi zarar') : (activePeriodData.isProfit ?? (activePeriodData.profit > 0)) ? t('grossProfitTitle', 'Yalpi foyda') : 'Yalpi natija'}
                 </span>
-                <div className={`text-2xl sm:text-[26px] font-black tracking-tight ${activePeriodData.isLoss ? 'text-rose-600' : 'text-emerald-600'}`}>
-                  {activePeriodData.isLoss ? `-${Math.abs(activePeriodData.profit).toLocaleString()}` : activePeriodData.profit.toLocaleString()} <span className={`text-sm font-bold ${activePeriodData.isLoss ? 'text-rose-500' : 'text-emerald-600/70'}`}>{t('sum', 'so‘m')}</span>
+                <div className={`text-2xl sm:text-[26px] font-black tracking-tight ${
+                  activePeriodData.isLoss ? 'text-rose-600' : (activePeriodData.isProfit ?? (activePeriodData.profit > 0)) ? 'text-emerald-600' : 'text-slate-700'
+                }`}>
+                  {activePeriodData.isLoss
+                    ? `-${Math.abs(activePeriodData.profit).toLocaleString()}`
+                    : (activePeriodData.isProfit ?? (activePeriodData.profit > 0))
+                    ? `+${activePeriodData.profit.toLocaleString()}`
+                    : '0'}{' '}
+                  <span className={`text-sm font-bold ${activePeriodData.isLoss ? 'text-rose-500' : (activePeriodData.isProfit ?? (activePeriodData.profit > 0)) ? 'text-emerald-600/70' : 'text-slate-400'}`}>{t('sum', 'so‘m')}</span>
                 </div>
-                <div className={`text-[11px] font-bold flex items-center gap-1 mt-1 ${activePeriodData.isLoss ? 'text-rose-600' : 'text-emerald-600'}`}>
+                <div className={`text-[11px] font-bold flex items-center gap-1 mt-1 ${
+                  activePeriodData.profitGrowthMetrics?.isNegative || activePeriodData.profitGrowthPct?.startsWith('↓')
+                    ? 'text-rose-600'
+                    : activePeriodData.profitGrowthMetrics?.isZero || activePeriodData.profitGrowthPct === '0%'
+                    ? 'text-slate-400'
+                    : 'text-emerald-600'
+                }`}>
                   <span>{activePeriodData.profitGrowthPct}</span>
                   <span className="text-[10px] text-slate-400 font-medium">{activePeriodData.comparisonText}</span>
                 </div>
@@ -323,7 +422,13 @@ export const Reports = () => {
                   </div>
                 )}
               </div>
-              <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${activePeriodData.isLoss ? 'from-rose-500 to-red-600 shadow-rose-500/25' : 'from-emerald-500 to-teal-600 shadow-emerald-500/25'} text-white flex items-center justify-center shadow-lg shrink-0 group-hover:scale-105 transition-transform`}>
+              <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${
+                activePeriodData.isLoss
+                  ? 'from-rose-500 to-red-600 shadow-rose-500/25'
+                  : (activePeriodData.isProfit ?? (activePeriodData.profit > 0))
+                  ? 'from-emerald-500 to-teal-600 shadow-emerald-500/25'
+                  : 'from-slate-500 to-slate-600 shadow-slate-500/25'
+              } text-white flex items-center justify-center shadow-lg shrink-0 group-hover:scale-105 transition-transform`}>
                 <TrendingUp className="w-6 h-6 stroke-[2.2]" />
               </div>
             </div>
@@ -377,10 +482,14 @@ export const Reports = () => {
                 </p>
               </div>
 
-              <div className="flex items-center space-x-4 text-xs font-bold">
+              <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-xs font-bold">
                 <div className="flex items-center space-x-2">
                   <span className="w-3 h-3 rounded-full bg-blue-600"></span>
                   <span className="text-slate-700">{t('revenueTitle', 'Tushum')}</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <span className="w-3 h-3 rounded-full bg-amber-500"></span>
+                  <span className="text-slate-700">{t('totalExpensesTitle', 'Xarajat')}</span>
                 </div>
                 <div className="flex items-center space-x-2">
                   <span className="w-3 h-3 rounded-full bg-emerald-500"></span>
@@ -391,34 +500,59 @@ export const Reports = () => {
 
             <div className="h-[320px] w-full pt-4">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={activePeriodData.chartData} margin={{ top: 20, right: 20, left: -10, bottom: 10 }}>
+                <BarChart
+                  data={activePeriodData.chartData}
+                  margin={{ top: 20, right: 20, left: -10, bottom: 10 }}
+                  barGap={4}
+                  barCategoryGap="20%"
+                >
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
                   <XAxis dataKey="label" stroke="#94A3B8" fontSize={11} fontWeight={700} axisLine={false} tickLine={false} />
-                  <YAxis stroke="#94A3B8" fontSize={10} fontWeight={600} axisLine={false} tickLine={false} tickFormatter={activePeriodData.formatY} domain={[activePeriodData.yAxisMin, activePeriodData.yAxisMax]} />
+                  <YAxis
+                    stroke="#94A3B8"
+                    fontSize={10}
+                    fontWeight={600}
+                    axisLine={false}
+                    tickLine={false}
+                    tickFormatter={activePeriodData.formatY}
+                    domain={[activePeriodData.yAxisMin, activePeriodData.yAxisMax]}
+                  />
+                  <ReferenceLine y={0} stroke="#CBD5E1" strokeWidth={1.5} />
                   <Tooltip
                     content={({ active, payload }) => {
                       if (active && payload && payload.length) {
                         const item = payload[0].payload;
                         const isLoss = item.foyda < 0;
                         return (
-                          <div className="bg-white p-3.5 rounded-2xl shadow-xl border border-slate-100 text-xs font-bold space-y-1 font-sans">
+                          <div className="bg-white p-3.5 rounded-2xl shadow-xl border border-slate-100 text-xs font-bold space-y-1.5 font-sans min-w-[190px]">
                             <div className="text-slate-400 text-[10px] uppercase font-black">{item.fullDate || item.label}</div>
-                            <div className="text-blue-600">{t('revenueTitle', 'Tushum')}: {payload[0].value.toLocaleString()} {t('sum', 'so‘m')}</div>
-                            <div className="text-slate-500 text-[11px]">{t('totalExpensesTitle', 'Xarajat / Tannarx')}: {(item.xarajat || 0).toLocaleString()} {t('sum', 'so‘m')}</div>
-                            {payload[1] && (
-                              <div className={isLoss ? 'text-rose-600 font-black' : 'text-emerald-600 font-black'}>
-                                {isLoss ? t('grossLossTitle', 'Yalpi zarar') : t('grossProfitTitle', 'Yalpi foyda')}: {isLoss ? `-${Math.abs(item.foyda).toLocaleString()}` : item.foyda.toLocaleString()} {t('sum', 'so‘m')}
-                              </div>
-                            )}
+                            <div className="text-blue-600 flex items-center justify-between gap-3">
+                              <span>{t('revenueTitle', 'Tushum')}:</span>
+                              <span>{Number(item.savdo || 0).toLocaleString('uz-UZ')} {t('sum', 'so‘m')}</span>
+                            </div>
+                            <div className="text-amber-600 flex items-center justify-between gap-3">
+                              <span>{t('totalExpensesTitle', 'Xarajat / Tannarx')}:</span>
+                              <span>{Number(item.xarajat || 0).toLocaleString('uz-UZ')} {t('sum', 'so‘m')}</span>
+                            </div>
+                            <div className={`${isLoss ? 'text-rose-600 font-black' : 'text-emerald-600 font-black'} flex items-center justify-between gap-3 pt-1 border-t border-slate-100`}>
+                              <span>{isLoss ? t('grossLossTitle', 'Yalpi zarar') : t('grossProfitTitle', 'Yalpi foyda')}:</span>
+                              <span>{isLoss ? `-${Math.abs(item.foyda).toLocaleString('uz-UZ')}` : Number(item.foyda || 0).toLocaleString('uz-UZ')} {t('sum', 'so‘m')}</span>
+                            </div>
                           </div>
                         );
                       }
                       return null;
                     }}
                   />
-                  <Bar dataKey="savdo" fill="#3B82F6" radius={[8, 8, 0, 0]} maxBarSize={45} />
-                  <Bar dataKey="foyda" radius={[8, 8, 0, 0]} maxBarSize={45}>
+                  <Bar dataKey="savdo" name={t('revenueTitle', 'Tushum')} fill="#3B82F6" radius={[6, 6, 0, 0]} maxBarSize={28} minPointSize={3} />
+                  <Bar dataKey="xarajat" name={t('totalExpensesTitle', 'Xarajat / Tannarx')} fill="#F59E0B" radius={[6, 6, 0, 0]} maxBarSize={28} minPointSize={3} />
+                  <Bar dataKey="foyda" name={t('grossProfitTitle', 'Yalpi foyda')} maxBarSize={28} minPointSize={3}>
                     {activePeriodData.chartData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.foyda < 0 ? '#EF4444' : '#10B981'} />
+                      <Cell
+                        key={`cell-${index}`}
+                        fill={entry.foyda < 0 ? '#EF4444' : '#10B981'}
+                        radius={entry.foyda < 0 ? [0, 0, 6, 6] : [6, 6, 0, 0]}
+                      />
                     ))}
                   </Bar>
                 </BarChart>
@@ -446,6 +580,11 @@ export const Reports = () => {
                 <div className="text-[11px] font-bold text-emerald-600 flex items-center gap-1 mt-1">
                   <span>{activePeriodData.salesCount} ta savdo tranzaksiyasi</span>
                 </div>
+                {activePeriodData.cashReceipts !== baseRevenue && (
+                  <div className="text-[10px] font-semibold text-slate-400 mt-0.5">
+                    Haqiqiy kassa kirimi: {activePeriodData.cashReceipts.toLocaleString()} so‘m
+                  </div>
+                )}
               </div>
               <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center shadow-lg shadow-blue-600/25 shrink-0 group-hover:scale-105 transition-transform">
                 <Wallet className="w-6 h-6 stroke-[2.2]" />
@@ -461,7 +600,13 @@ export const Reports = () => {
                   {realCost.toLocaleString()} <span className="text-sm font-bold text-amber-500">{t('sum', 'so‘m')}</span>
                 </div>
                 <div className="text-[11px] font-semibold text-slate-400 mt-1">
-                  {t('basedOnPurchasePrice', 'Xarid narxi asosida')}
+                  {activePeriodData.hasUnverifiedCosts ? (
+                    <span className="text-amber-600 font-bold bg-amber-50 px-2 py-0.5 rounded-lg border border-amber-200/60 inline-block">
+                      * {activePeriodData.unverifiedCount} ta tovar tannarxisiz
+                    </span>
+                  ) : (
+                    t('basedOnPurchasePrice', 'Xarid narxi asosida')
+                  )}
                 </div>
               </div>
               <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-500 text-white flex items-center justify-center shadow-lg shadow-amber-500/25 shrink-0 group-hover:scale-105 transition-transform">
@@ -469,19 +614,44 @@ export const Reports = () => {
               </div>
             </div>
 
-            <div className={`bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs hover:shadow-md transition-all flex items-center justify-between group ${isOverallLoss ? 'hover:border-rose-200' : 'hover:border-emerald-200'}`}>
+            <div className={`bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs hover:shadow-md transition-all flex items-center justify-between group ${
+              isOverallLoss ? 'hover:border-rose-200' : isOverallProfit ? 'hover:border-emerald-200' : 'hover:border-slate-300'
+            }`}>
               <div className="space-y-1">
                 <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 block">
-                  {isOverallLoss ? t('netOperatingLoss', 'Sof Operatsion Zarar') : t('netOperatingProfit', 'Sof Operatsion Foyda')}
+                  {isOverallLoss ? 'Yalpi zarar' : isOverallProfit ? 'Yalpi foyda' : 'Yalpi natija'}
                 </span>
-                <div className={`text-2xl sm:text-[26px] font-black tracking-tight ${isOverallLoss ? 'text-rose-600' : 'text-emerald-600'}`}>
-                  {isOverallLoss ? `-${Math.abs(realProfit).toLocaleString()}` : realProfit.toLocaleString()} <span className={`text-sm font-bold ${isOverallLoss ? 'text-rose-500' : 'text-emerald-600/70'}`}>{t('sum', 'so‘m')}</span>
+                <div className={`text-2xl sm:text-[26px] font-black tracking-tight ${
+                  isOverallLoss ? 'text-rose-600' : isOverallProfit ? 'text-emerald-600' : 'text-slate-700'
+                }`}>
+                  {isOverallLoss
+                    ? `-${Math.abs(realProfit).toLocaleString()}`
+                    : isOverallProfit
+                    ? `+${realProfit.toLocaleString()}`
+                    : '0'}{' '}
+                  <span className={`text-sm font-bold ${
+                    isOverallLoss ? 'text-rose-500' : isOverallProfit ? 'text-emerald-600/70' : 'text-slate-400'
+                  }`}>{t('sum', 'so‘m')}</span>
                 </div>
-                <div className={`text-[11px] font-bold flex items-center gap-1 mt-1 ${isOverallLoss ? 'text-rose-600' : 'text-emerald-600'}`}>
-                  <span>{isOverallLoss ? t('lossOperations', 'Zararli davr natijasi') : t('grossProfitability', 'Yalpi daromadlilik')}</span>
+                <div className={`text-[11px] font-bold flex items-center gap-1 mt-1 ${
+                  isOverallLoss ? 'text-rose-600' : isOverallProfit ? 'text-emerald-600' : 'text-slate-500'
+                }`}>
+                  <span>
+                    {isOverallLoss
+                      ? 'Zararli davr natijasi'
+                      : isOverallProfit
+                      ? 'Foydali davr natijasi'
+                      : 'Nol natija (daromad va xarajat teng)'}
+                  </span>
                 </div>
               </div>
-              <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${isOverallLoss ? 'from-rose-500 to-red-600 shadow-rose-500/25' : 'from-emerald-500 to-teal-600 shadow-emerald-500/25'} text-white flex items-center justify-center shadow-lg shrink-0 group-hover:scale-105 transition-transform`}>
+              <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${
+                isOverallLoss
+                  ? 'from-rose-500 to-red-600 shadow-rose-500/25'
+                  : isOverallProfit
+                  ? 'from-emerald-500 to-teal-600 shadow-emerald-500/25'
+                  : 'from-slate-500 to-slate-600 shadow-slate-500/25'
+              } text-white flex items-center justify-center shadow-lg shrink-0 group-hover:scale-105 transition-transform`}>
                 <TrendingUp className="w-6 h-6 stroke-[2.2]" />
               </div>
             </div>
@@ -491,11 +661,13 @@ export const Reports = () => {
                 <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 block">
                   {t('profitabilityRate', 'Rentabellik Ko‘rsatkichi')}
                 </span>
-                <div className="text-2xl sm:text-[26px] font-black text-purple-600 tracking-tight">
+                <div className={`text-2xl sm:text-[26px] font-black tracking-tight ${
+                  isOverallLoss ? 'text-rose-600' : isOverallProfit ? 'text-purple-600' : 'text-slate-700'
+                }`}>
                   {realMarginPct}
                 </div>
                 <div className="text-[11px] font-bold text-slate-400 mt-1">
-                  {t('netMarginPct', 'Sof marja foizi')}
+                  Yalpi rentabellik foizi
                 </div>
               </div>
               <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-purple-600 to-indigo-600 text-white flex items-center justify-center shadow-lg shadow-purple-600/25 shrink-0 group-hover:scale-105 transition-transform">
@@ -512,11 +684,11 @@ export const Reports = () => {
                   {t('productProfitabilityTitle', 'Mahsulotlar Bo‘yicha Daromadlilik va Marja Tahlili')}
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  {t('productProfitabilitySubtitle', 'Do‘kondagi mavjud tovarlarning sotish va tannarx nisbati')}
+                  Tanlangan davr ({timeFilter}) bo‘yicha sotilgan tovarlarning tushum, tannarx va foyda ko‘rsatkichlari
                 </p>
               </div>
               <span className="text-xs font-black px-3 py-1 bg-emerald-50 text-emerald-700 rounded-xl border border-emerald-200">
-                {products.length} {t('productsCountSuffix', 'ta mahsulot')}
+                {periodProductBreakdown.length} ta sotilgan tovar
               </span>
             </div>
 
@@ -525,40 +697,92 @@ export const Reports = () => {
                 <thead>
                   <tr className="bg-slate-50/90 text-slate-400 font-extrabold uppercase text-[11px] tracking-wider border-b border-slate-200/80">
                     <th className="py-4 px-6">{t('colProduct', 'Mahsulot nomi')}</th>
-                    <th className="py-4 px-6">{t('colCategory', 'Kategoriya')}</th>
-                    <th className="py-4 px-6">{t('colPrice', 'Sotish narxi')}</th>
-                    <th className="py-4 px-6">{t('colCostPrice', 'Tannarxi')}</th>
-                    <th className="py-4 px-6">{t('unitProfit', 'Birlik foydasi')}</th>
+                    <th className="py-4 px-6">Sotilgan miqdor</th>
+                    <th className="py-4 px-6">Savdo summasi</th>
+                    <th className="py-4 px-6">Tannarx</th>
+                    <th className="py-4 px-6">Yalpi foyda / zarar</th>
                     <th className="py-4 px-6 text-right">{t('marginCol', 'Rentabellik (Marja)')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium">
-                  {products.map(p => {
-                    const prof = calculateProductProfitability(p);
-                    return (
-                      <tr key={p.id} className="hover:bg-slate-50/80 transition-colors">
-                        <td className="py-4 px-6 font-bold text-slate-900 flex items-center gap-2">
-                          <span>{p.emoji || '📦'}</span>
-                          <span>{tProduct(p.name)}</span>
+                  {periodProductBreakdown.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-12 text-center text-slate-400 font-semibold">
+                        <Package className="w-10 h-10 mx-auto text-slate-300 mb-2 stroke-[1.5]" />
+                        <span>Tanlangan davrda ({timeFilter}) tovar savdolari mavjud emas</span>
+                      </td>
+                    </tr>
+                  ) : (
+                    periodProductBreakdown.map(p => (
+                      <tr key={p.name} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="py-4 px-6 font-bold text-slate-900">
+                          <div className="flex items-center gap-2">
+                            <span>{p.emoji || '📦'}</span>
+                            <span>{tProduct(p.name)}</span>
+                          </div>
+                          <div className="text-[11px] text-slate-400 font-medium mt-0.5 ml-6">
+                            {tCategory(p.category || 'Asosiy')}
+                          </div>
                         </td>
-                        <td className="py-4 px-6 text-slate-500 font-medium">{tCategory(p.category || 'Asosiy')}</td>
-                        <td className="py-4 px-6 font-bold text-slate-800">{prof.price.toLocaleString()} {t('sum', 'so‘m')}</td>
-                        <td className="py-4 px-6 font-medium text-slate-500">{prof.cost.toLocaleString()} {t('sum', 'so‘m')}</td>
-                        <td className={`py-4 px-6 font-black ${prof.isLoss ? 'text-rose-600' : 'text-emerald-600'}`}>
-                          {prof.isLoss ? `-${Math.abs(prof.unitProfit).toLocaleString()}` : `+${prof.unitProfit.toLocaleString()}`} {t('sum', 'so‘m')}
+                        <td className="py-4 px-6 font-bold text-slate-800">
+                          {p.qty} <span className="text-xs font-semibold text-slate-500">{tUnit(p.unit)}</span>
+                        </td>
+                        <td className="py-4 px-6 font-bold text-slate-800">
+                          <div>{p.revenue.toLocaleString()} {t('sum', 'so‘m')}</div>
+                          <div className="text-[11px] text-slate-400 font-normal">
+                            {p.unitPrice.toLocaleString()} {t('sum', 'so‘m')}/{p.unit}
+                          </div>
+                        </td>
+                        <td className="py-4 px-6">
+                          {p.isKnownCost ? (
+                            <div>
+                              <div className="font-semibold text-slate-700">{p.cost.toLocaleString()} {t('sum', 'so‘m')}</div>
+                              <div className="text-[11px] text-slate-400 font-normal">
+                                {p.unitCost.toLocaleString()} {t('sum', 'so‘m')}/{p.unit}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="inline-block px-2.5 py-0.5 rounded-lg bg-amber-50 text-amber-700 border border-amber-200/80 text-[11px] font-bold">
+                              Noma‘lum
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-4 px-6">
+                          {p.isKnownCost ? (
+                            <span className={`font-black ${p.isLoss ? 'text-rose-600' : p.isZero ? 'text-slate-700' : 'text-emerald-600'}`}>
+                              {p.isLoss
+                                ? `-${Math.abs(p.profit).toLocaleString()}`
+                                : p.isZero
+                                ? '0'
+                                : `+${p.profit.toLocaleString()}`}{' '}
+                              {t('sum', 'so‘m')}
+                            </span>
+                          ) : (
+                            <span className="inline-block px-2.5 py-0.5 rounded-lg bg-slate-100 text-slate-500 border border-slate-200 text-[11px] font-bold">
+                              Noma‘lum
+                            </span>
+                          )}
                         </td>
                         <td className="py-4 px-6 text-right">
-                          <span className={`inline-block px-2.5 py-1 rounded-xl text-xs font-black ${
-                            prof.isLoss
-                              ? 'bg-rose-50 text-rose-700 border border-rose-200/80'
-                              : 'bg-emerald-50 text-emerald-700 border border-emerald-200/80'
-                          }`}>
-                            {prof.margin}%
-                          </span>
+                          {p.isKnownCost ? (
+                            <span className={`inline-block px-2.5 py-1 rounded-xl text-xs font-black ${
+                              p.isLoss
+                                ? 'bg-rose-50 text-rose-700 border border-rose-200/80'
+                                : p.isZero
+                                ? 'bg-slate-100 text-slate-700 border border-slate-200'
+                                : 'bg-emerald-50 text-emerald-700 border border-emerald-200/80'
+                            }`}>
+                              {p.margin}%
+                            </span>
+                          ) : (
+                            <span className="inline-block px-2.5 py-1 rounded-xl text-xs font-bold bg-slate-100 text-slate-400 border border-slate-200">
+                              —
+                            </span>
+                          )}
                         </td>
                       </tr>
-                    );
-                  })}
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>

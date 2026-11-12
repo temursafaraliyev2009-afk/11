@@ -22,7 +22,8 @@ import {
   ShieldAlert,
   ArrowRight,
   Filter,
-  FileText
+  FileText,
+  Trash2
 } from 'lucide-react';
 import { useStore, isRentalSupportedStoreType } from '../context/StoreContext';
 import { useLanguage } from '../context/LanguageContext';
@@ -35,14 +36,17 @@ export const Rentals = ({ setActiveTab }) => {
     addRental,
     updateRentalStatus,
     addRentalPayment,
+    deleteRental,
     products = [],
     debts = [],
     currentStore,
-    storeConfig
+    storeConfig,
+    isItemPendingDelete,
+    setItemPendingDelete
   } = useStore();
 
   const { t } = useLanguage();
-  const { notifySuccess, notifyError, notifyInfo } = useToast();
+  const { notifySuccess, notifyError, notifyInfo, showUndoDelete } = useToast();
 
   const storeType = currentStore?.type || storeConfig?.id || 'food';
   const isRentalAllowed = isRentalSupportedStoreType(storeType);
@@ -54,6 +58,9 @@ export const Rentals = ({ setActiveTab }) => {
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 8;
+
+  // Deleting Rental State (5 soniyalik bekor qilish uchun)
+  const [deletingRental, setDeletingRental] = useState(null);
 
   // New Rental Modal State
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -123,18 +130,19 @@ export const Rentals = ({ setActiveTab }) => {
 
   // ----------------------------------------------------
   // STATISTIKALAR (4 TA KARTA)
-  // 1. Jami ijara (total rentals count)
-  // 2. Faol ijara (active rentals count)
-  // 3. Tugatilgan ijara (returned rentals count)
-  // 4. Muddati o‘tgan (overdue rentals count)
+  // Faol (o'chirish jarayonida bo'lmagan) ijara yozuvlari ro'yxati
   // ----------------------------------------------------
+  const activeRentals = useMemo(() => {
+    return rentals.filter(r => !isItemPendingDelete(r.id));
+  }, [rentals, isItemPendingDelete]);
+
   const stats = useMemo(() => {
-    const total = rentals.length;
+    const total = activeRentals.length;
     let active = 0;
     let returned = 0;
     let overdue = 0;
 
-    rentals.forEach((r) => {
+    activeRentals.forEach((r) => {
       if (r.status === 'Qaytarilgan') {
         returned++;
       } else if (r.status === 'Muddati o‘tgan' || (r.status === 'Faol' && r.endDate && r.endDate < todayStr)) {
@@ -145,7 +153,7 @@ export const Rentals = ({ setActiveTab }) => {
     });
 
     return { total, active, returned, overdue };
-  }, [rentals, todayStr]);
+  }, [activeRentals, todayStr]);
 
   // Helper to determine real-time status of a rental
   const getComputedStatus = (r) => {
@@ -160,7 +168,7 @@ export const Rentals = ({ setActiveTab }) => {
   // FILTERED RENTALS LIST
   // ----------------------------------------------------
   const filteredRentals = useMemo(() => {
-    return rentals.filter((r) => {
+    return activeRentals.filter((r) => {
       const computedStatus = getComputedStatus(r);
 
       // 1. Tab filter
@@ -187,7 +195,7 @@ export const Rentals = ({ setActiveTab }) => {
 
       return true;
     });
-  }, [rentals, activeTab, paymentFilter, searchQuery, todayStr]);
+  }, [activeRentals, activeTab, paymentFilter, searchQuery, todayStr]);
 
   // Pagination calculation
   const totalPages = Math.max(1, Math.ceil(filteredRentals.length / pageSize));
@@ -558,18 +566,18 @@ export const Rentals = ({ setActiveTab }) => {
         {/* Tabs & Filter */}
         <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto">
           {/* Tabs: Barchasi, Faol ijara, Qaytarilgan, Muddati o‘tgan */}
-          <div className="flex items-center space-x-2 overflow-x-auto pb-1 sm:pb-0">
+          <div className="flex items-center space-x-2 overflow-x-auto md:overflow-x-visible py-1.5 px-1 scrollbar-none">
             <button
               onClick={() => handleTabChange('all')}
-              className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+              className={`btn-pill-base px-4 py-2.5 rounded-2xl text-xs sm:text-sm ${
                 activeTab === 'all'
-                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-600/25 font-black'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  ? 'btn-pill-blue font-black'
+                  : 'btn-pill-inactive'
               }`}
             >
               <span>Barchasi</span>
-              <span className={`px-2 py-0.5 rounded-lg text-[11px] font-black ${
-                activeTab === 'all' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+              <span className={`px-2 py-0.5 rounded-lg text-[11px] font-black transition-colors ${
+                activeTab === 'all' ? 'btn-pill-badge-active' : 'btn-pill-badge-inactive'
               }`}>
                 {stats.total}
               </span>
@@ -577,15 +585,15 @@ export const Rentals = ({ setActiveTab }) => {
 
             <button
               onClick={() => handleTabChange('active')}
-              className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+              className={`btn-pill-base px-4 py-2.5 rounded-2xl text-xs sm:text-sm ${
                 activeTab === 'active'
-                  ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-600/25 font-black'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  ? 'btn-pill-emerald font-black'
+                  : 'btn-pill-inactive'
               }`}
             >
               <span>Faol ijara</span>
-              <span className={`px-2 py-0.5 rounded-lg text-[11px] font-black ${
-                activeTab === 'active' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+              <span className={`px-2 py-0.5 rounded-lg text-[11px] font-black transition-colors ${
+                activeTab === 'active' ? 'btn-pill-badge-active' : 'btn-pill-badge-inactive'
               }`}>
                 {stats.active}
               </span>
@@ -593,15 +601,15 @@ export const Rentals = ({ setActiveTab }) => {
 
             <button
               onClick={() => handleTabChange('returned')}
-              className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+              className={`btn-pill-base px-4 py-2.5 rounded-2xl text-xs sm:text-sm ${
                 activeTab === 'returned'
-                  ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md shadow-indigo-600/25 font-black'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  ? 'btn-pill-purple font-black'
+                  : 'btn-pill-inactive'
               }`}
             >
               <span>Qaytarilgan</span>
-              <span className={`px-2 py-0.5 rounded-lg text-[11px] font-black ${
-                activeTab === 'returned' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+              <span className={`px-2 py-0.5 rounded-lg text-[11px] font-black transition-colors ${
+                activeTab === 'returned' ? 'btn-pill-badge-active' : 'btn-pill-badge-inactive'
               }`}>
                 {stats.returned}
               </span>
@@ -609,15 +617,15 @@ export const Rentals = ({ setActiveTab }) => {
 
             <button
               onClick={() => handleTabChange('overdue')}
-              className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+              className={`btn-pill-base px-4 py-2.5 rounded-2xl text-xs sm:text-sm ${
                 activeTab === 'overdue'
-                  ? 'bg-gradient-to-r from-rose-600 to-red-600 text-white shadow-md shadow-rose-600/25 font-black'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  ? 'btn-pill-rose font-black'
+                  : 'btn-pill-inactive'
               }`}
             >
               <span>Muddati o‘tgan</span>
-              <span className={`px-2 py-0.5 rounded-lg text-[11px] font-black ${
-                activeTab === 'overdue' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+              <span className={`px-2 py-0.5 rounded-lg text-[11px] font-black transition-colors ${
+                activeTab === 'overdue' ? 'btn-pill-badge-active' : 'btn-pill-badge-inactive'
               }`}>
                 {stats.overdue}
               </span>
@@ -628,16 +636,16 @@ export const Rentals = ({ setActiveTab }) => {
           <div className="relative">
             <button
               onClick={() => setIsFilterOpen(!isFilterOpen)}
-              className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold border flex items-center gap-1.5 transition-all cursor-pointer ${
+              className={`btn-pill-base px-3.5 py-2.5 rounded-2xl text-xs font-bold ${
                 paymentFilter !== 'all'
-                  ? 'bg-blue-50 border-blue-300 text-blue-700 font-extrabold'
-                  : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                  ? 'btn-pill-blue font-extrabold'
+                  : 'btn-pill-inactive'
               }`}
             >
               <Filter className="w-3.5 h-3.5" />
               <span>To‘lov holati</span>
               {paymentFilter !== 'all' && (
-                <span className="w-2 h-2 rounded-full bg-blue-600 ml-0.5" />
+                <span className="w-2 h-2 rounded-full bg-white ml-0.5" />
               )}
             </button>
 
@@ -1360,6 +1368,18 @@ export const Rentals = ({ setActiveTab }) => {
                   {selectedRentalForDetails.notes}
                 </div>
               )}
+
+              {/* O'chirish tugmasi */}
+              <div className="pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setDeletingRental(selectedRentalForDetails)}
+                  className="w-full py-2.5 rounded-2xl bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold text-xs border border-rose-200/80 flex items-center justify-center gap-2 transition-all cursor-pointer"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>Ijara yozuvini o‘chirish</span>
+                </button>
+              </div>
             </div>
           </div>
         </ModalPortal>
@@ -1399,6 +1419,74 @@ export const Rentals = ({ setActiveTab }) => {
                   className="w-1/2 py-2.5 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-extrabold text-xs shadow-md shadow-blue-600/25 hover:opacity-95 cursor-pointer transition-all active:scale-[0.98]"
                 >
                   Ha, qaytarildi
+                </button>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL 4: IJARANI O'CHIRISHNI TASDIQLASH VA 5 SONIYALIK BEKOR QILISH       */}
+      {/* ========================================================================= */}
+      {deletingRental && (
+        <ModalPortal>
+          <div className="fixed inset-0 z-[99999] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 font-sans select-none animate-in fade-in duration-150">
+            <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl border border-slate-100 space-y-4 text-center">
+              <div className="w-14 h-14 rounded-2xl bg-rose-50 border border-rose-100 text-rose-600 flex items-center justify-center mx-auto shadow-sm">
+                <Trash2 className="w-7 h-7" />
+              </div>
+
+              <div className="space-y-1.5">
+                <h3 className="font-extrabold text-slate-900 text-base leading-snug">
+                  Ijara yozuvini o‘chirishni tasdiqlaysizmi?
+                </h3>
+                <p className="text-xs text-slate-600 font-semibold">
+                  {deletingRental.productName} — {deletingRental.customerName}
+                </p>
+              </div>
+
+              <div className="flex items-center space-x-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setDeletingRental(null)}
+                  className="flex-1 py-3 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition-colors cursor-pointer"
+                >
+                  Bekor qilish
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const targetRental = deletingRental;
+                    setDeletingRental(null);
+                    setSelectedRentalForDetails(null);
+                    if (!targetRental || isItemPendingDelete(targetRental.id)) return;
+
+                    // 1. Vaqtincha interfeysdan yashirish (bazaga tegilmaydi)
+                    setItemPendingDelete(targetRental.id, true);
+
+                    // 2. 5 soniyalik bekor qilish bildirishnomasini ko'rsatish
+                    showUndoDelete({
+                      title: 'Ijara yozuvi o‘chirilmoqda...',
+                      seconds: 5,
+                      successMessage: 'Ijara yozuvi muvaffaqiyatli o‘chirildi.',
+                      onUndo: () => {
+                        setItemPendingDelete(targetRental.id, false);
+                      },
+                      onCommit: async () => {
+                        try {
+                          deleteRental(targetRental.id);
+                          setItemPendingDelete(targetRental.id, false);
+                        } catch (err) {
+                          setItemPendingDelete(targetRental.id, false);
+                          throw err;
+                        }
+                      }
+                    });
+                  }}
+                  className="flex-1 py-3 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-lg shadow-rose-600/25 transition-all cursor-pointer"
+                >
+                  O‘chirish
                 </button>
               </div>
             </div>

@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useCart } from '../context/CartContext';
 import { useLanguage } from '../context/LanguageContext';
+import { getLocalDateString } from '../utils/dateUtils';
 import {
   BarChart,
   Bar,
@@ -11,33 +12,98 @@ import {
   PieChart,
   Pie,
   Cell,
-  Legend
+  Legend,
+  CartesianGrid
 } from 'recharts';
 import { TrendingUp, PieChart as PieIcon, DollarSign, ArrowLeft, Sparkles, Zap, Award } from 'lucide-react';
 import { Link } from 'react-router-dom';
-
-const MONTHLY_SPENDING = [
-  { month: 'Apr', amount: 850000 },
-  { month: 'May', amount: 1200000 },
-  { month: 'Iyun', amount: 950000 },
-  { month: 'Iyul', amount: 1400000 },
-  { month: 'Avg', amount: 2100000 },
-  { month: 'Sen', amount: 1563000 }
-];
+import { formatChartAxisNumber, computeChartDomain } from '../utils/financeUtils.js';
 
 export const AnalyticsPage = () => {
-  const { formatPrice, orders } = useCart();
+  const { formatPrice, orders = [] } = useCart();
   const { t, tCategory } = useLanguage();
 
-  const CATEGORY_BREAKDOWN = [
-    { name: tCategory("Oziq-ovqat & Go'sht", "Oziq-ovqat & Go'sht"), value: 45, color: '#10b981' },
-    { name: tCategory('Sarxil Mevalar', 'Sarxil Mevalar'), value: 25, color: '#f59e0b' },
-    { name: tCategory('Elektronika', 'Elektronika'), value: 20, color: '#3b82f6' },
-    { name: tCategory('Maishiy Texnika', 'Maishiy Texnika'), value: 10, color: '#8b5cf6' }
-  ];
+  const now = new Date();
+  const todayStr = getLocalDateString(now);
 
-  const totalSpent = orders.reduce((sum, ord) => sum + ord.total, 1563000);
-  const totalSaved = Math.round(totalSpent * 0.15);
+  // Haqiqiy buyurtmalar asosida so'nggi 6 oy statistikasini dinamik hisoblash
+  const monthlySpending = useMemo(() => {
+    const monthNames = ['Yan', 'Fev', 'Mar', 'Apr', 'May', 'Iyun', 'Iyul', 'Avg', 'Sen', 'Okt', 'Noy', 'Dek'];
+    const currentYear = parseInt(todayStr.substring(0, 4), 10);
+    const currentMonth = parseInt(todayStr.substring(5, 7), 10); // 1-12
+
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+      let m = currentMonth - i;
+      let y = currentYear;
+      if (m <= 0) {
+        m += 12;
+        y -= 1;
+      }
+      const mStr = String(m).padStart(2, '0');
+      const prefix = `${y}-${mStr}`;
+      const monthOrders = (orders || []).filter(ord => {
+        const oDate = ord.date || ord.createdAt || '';
+        return oDate.startsWith(prefix);
+      });
+      const amount = monthOrders.reduce((sum, ord) => sum + (Number(ord.total) || 0), 0);
+      months.push({
+        month: monthNames[m - 1],
+        yearMonth: prefix,
+        amount
+      });
+    }
+    return months;
+  }, [orders, todayStr]);
+
+  const spendingDomain = useMemo(() => {
+    return computeChartDomain(monthlySpending, ['amount'], 500000);
+  }, [monthlySpending]);
+
+  // Haqiqiy buyurtmalar asosida kategoriyalar ulushini hisoblash
+  const categoryBreakdown = useMemo(() => {
+    const COLORS = ['#10b981', '#f59e0b', '#3b82f6', '#8b5cf6', '#ec4899', '#06b6d4'];
+    const map = {};
+
+    (orders || []).forEach(ord => {
+      if (Array.isArray(ord.items) && ord.items.length > 0) {
+        ord.items.forEach(item => {
+          const cat = item.category || 'Boshqa';
+          map[cat] = (map[cat] || 0) + (Number(item.quantity || item.qty) || 1);
+        });
+      } else if (ord.category) {
+        map[ord.category] = (map[ord.category] || 0) + (Number(ord.itemsCount) || 1);
+      }
+    });
+
+    const entries = Object.entries(map);
+    if (entries.length === 0) {
+      return [
+        { name: t('noData', 'Ma\'lumot yo\'q'), value: 1, color: '#CBD5E1', isPlaceholder: true }
+      ];
+    }
+
+    const totalQty = entries.reduce((s, [, v]) => s + v, 0);
+    return entries.map(([name, val], idx) => ({
+      name: tCategory(name, name),
+      value: totalQty > 0 ? Math.round((val / totalQty) * 100) : 0,
+      color: COLORS[idx % COLORS.length]
+    }));
+  }, [orders, t, tCategory]);
+
+  const totalSpent = useMemo(() => {
+    return (orders || []).reduce((sum, ord) => sum + (Number(ord.total) || 0), 0);
+  }, [orders]);
+
+  const totalSaved = useMemo(() => {
+    return (orders || []).reduce((sum, ord) => sum + (Number(ord.discount) || 0), 0);
+  }, [orders]);
+
+  const activeMonthsWithOrders = useMemo(() => {
+    return monthlySpending.filter(m => m.amount > 0).length || 1;
+  }, [monthlySpending]);
+
+  const avgMonthlyExpense = totalSpent > 0 ? Math.round(totalSpent / activeMonthsWithOrders) : 0;
 
   return (
     <div className="min-h-screen py-8 max-w-6xl mx-auto px-4 sm:px-6">
@@ -66,7 +132,11 @@ export const AnalyticsPage = () => {
           <div className="text-3xl font-black mt-2">{formatPrice(totalSpent)}</div>
           <div className="text-xs mt-4 opacity-90 flex items-center gap-1">
             <Sparkles className="w-3.5 h-3.5" />
-            <span>{t('avgMonthlyExpense', "O'rtacha oylik 1.2 mln so'm")}</span>
+            <span>
+              {totalSpent > 0
+                ? `${t('avgMonthlyExpense', "O'rtacha oylik")} ${formatPrice(avgMonthlyExpense)}`
+                : t('noOrdersYet', "Xaridlar mavjud emas")}
+            </span>
           </div>
         </div>
 
@@ -86,14 +156,17 @@ export const AnalyticsPage = () => {
           <div>
             <div className="text-xs uppercase tracking-wider font-bold text-gray-400">{t('statusLevel', 'Status darajasi')}</div>
             <div className="text-xl font-extrabold text-emerald-600 dark:text-emerald-400 mt-1">
-              {t('goldClient', 'GOLD Mijoz 👑')}
+              {totalSpent > 10000000 ? t('goldClient', 'GOLD Mijoz 👑') : totalSpent > 0 ? t('silverClient', 'SILVER Mijoz 🥈') : t('newClient', 'Yangi Mijoz ✨')}
             </div>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-              {t('nextLevelPrompt', "Keyingi darajaga o'tish uchun yana 2 ta buyurtma bering va Bepul Yetkazish VIP ga ega bo'ling.")}
+              {t('nextLevelPrompt', "Keyingi darajaga o'tish uchun buyurtma bering va Bepul Yetkazish VIP ga ega bo'ling.")}
             </p>
           </div>
           <div className="w-full bg-gray-100 dark:bg-slate-800 h-2 rounded-full mt-4 overflow-hidden">
-            <div className="bg-emerald-500 h-full w-3/4 rounded-full" />
+            <div
+              className="bg-emerald-500 h-full rounded-full transition-all duration-300"
+              style={{ width: `${Math.min(100, Math.max(5, (totalSpent / 10000000) * 100))}%` }}
+            />
           </div>
         </div>
       </div>
@@ -111,14 +184,26 @@ export const AnalyticsPage = () => {
 
           <div className="h-64 w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={MONTHLY_SPENDING}>
-                <XAxis dataKey="month" stroke="#94a3b8" fontSize={12} />
-                <YAxis stroke="#94a3b8" fontSize={10} tickFormatter={(v) => `${v/1000}k`} />
+              <BarChart
+                data={monthlySpending}
+                margin={{ top: 10, right: 10, left: -10, bottom: 0 }}
+                barCategoryGap="25%"
+              >
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#94a3b8" opacity={0.15} />
+                <XAxis dataKey="month" stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} />
+                <YAxis
+                  stroke="#94a3b8"
+                  fontSize={10}
+                  tickLine={false}
+                  axisLine={false}
+                  domain={spendingDomain}
+                  tickFormatter={formatChartAxisNumber}
+                />
                 <Tooltip
-                  formatter={(val) => [`${val.toLocaleString()} ${t('sum', "so'm")}`, t('totalExpensesTitle', 'Xarajat')]}
+                  formatter={(val) => [`${Number(val).toLocaleString('uz-UZ')} ${t('sum', "so'm")}`, t('totalExpensesTitle', 'Xarajat')]}
                   contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b', borderRadius: '12px', color: '#fff' }}
                 />
-                <Bar dataKey="amount" fill="#10b981" radius={[8, 8, 0, 0]} />
+                <Bar dataKey="amount" fill="#10b981" radius={[6, 6, 0, 0]} maxBarSize={36} minPointSize={2} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -135,19 +220,19 @@ export const AnalyticsPage = () => {
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
-                  data={CATEGORY_BREAKDOWN}
+                  data={categoryBreakdown}
                   cx="50%"
                   cy="50%"
                   innerRadius={55}
                   outerRadius={80}
-                  paddingAngle={5}
+                  paddingAngle={categoryBreakdown[0]?.isPlaceholder ? 0 : 5}
                   dataKey="value"
                 >
-                  {CATEGORY_BREAKDOWN.map((entry, index) => (
+                  {categoryBreakdown.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.color} />
                   ))}
                 </Pie>
-                <Tooltip formatter={(val) => [`${val}%`, t('categoryShare', 'Ulush')]} />
+                <Tooltip formatter={(val, name, props) => [props.payload?.isPlaceholder ? t('noData', 'Ma\'lumot yo\'q') : `${val}%`, t('categoryShare', 'Ulush')]} />
                 <Legend />
               </PieChart>
             </ResponsiveContainer>

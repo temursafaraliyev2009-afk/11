@@ -6,7 +6,25 @@
  * boshqaradi va "Xodim qo'shish" moduli uchun qidiruv va verifikatsiyani ta'minlaydi.
  */
 
+import { supabase } from '../lib/supabase.js';
+
 export const REGISTERED_ACCOUNTS_KEY = 'savatchi_registered_accounts';
+
+// Cross-tab / cross-window synchronization via BroadcastChannel
+if (typeof window !== 'undefined' && typeof BroadcastChannel !== 'undefined') {
+  try {
+    const syncChannel = new BroadcastChannel('savatchi_accounts_sync');
+    syncChannel.onmessage = (event) => {
+      if (event.data?.type === 'ACCOUNT_REGISTERED' && event.data?.account) {
+        window.dispatchEvent(
+          new CustomEvent('savatchi_account_registered', {
+            detail: event.data.account
+          })
+        );
+      }
+    };
+  } catch (e) {}
+}
 
 // Tizimda oldindan mavjud bo'lgan asosiy foydalanuvchi akkauntlari
 const INITIAL_ACCOUNTS = [
@@ -213,11 +231,16 @@ export const getAllRegisteredAccounts = () => {
                 a => (p.email && a.email && a.email.toLowerCase() === p.email.toLowerCase()) ||
                      (p.phone && a.phone && normalizePhone(a.phone) === normalizePhone(p.phone))
               );
+              const keySuffix = key.replace('savatchi_profile_', '');
+              const inferredId = p.id || p.uid || (!keySuffix.includes('@') ? keySuffix : `usr-${Date.now()}-${Math.floor(Math.random() * 1000)}`);
+
               if (existingIdx >= 0) {
                 // Mavjudini eng so'nggi profil ma'lumotlari bilan yangilaymiz
                 accounts[existingIdx] = {
                   ...accounts[existingIdx],
                   ...p,
+                  id: accounts[existingIdx].id || inferredId,
+                  uid: accounts[existingIdx].uid || inferredId,
                   displayName: p.displayName || accounts[existingIdx].displayName,
                   firstName: p.firstName !== undefined ? p.firstName : accounts[existingIdx].firstName,
                   lastName: p.lastName !== undefined ? p.lastName : accounts[existingIdx].lastName,
@@ -226,12 +249,12 @@ export const getAllRegisteredAccounts = () => {
                 };
               } else {
                 accounts.push({
-                  id: p.id || p.uid || `usr-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-                  uid: p.uid || p.id,
+                  id: inferredId,
+                  uid: inferredId,
                   displayName: p.displayName || `${p.firstName || ''} ${p.lastName || ''}`.trim() || p.email?.split('@')[0] || 'Foydalanuvchi',
                   firstName: p.firstName || '',
                   lastName: p.lastName || '',
-                  email: p.email || '',
+                  email: p.email || (keySuffix.includes('@') ? keySuffix : ''),
                   phone: p.phone || '',
                   photoURL: p.photoURL || null,
                   avatar: (p.displayName || p.firstName || p.email || 'U').charAt(0).toUpperCase(),
@@ -277,6 +300,10 @@ export const getAllRegisteredAccounts = () => {
         }
       });
     }
+  } catch (e) {}
+
+  try {
+    localStorage.setItem(REGISTERED_ACCOUNTS_KEY, JSON.stringify(accounts));
   } catch (e) {}
 
   return accounts;
@@ -328,6 +355,18 @@ export const registerSystemAccount = (accountData) => {
 
   try {
     localStorage.setItem(REGISTERED_ACCOUNTS_KEY, JSON.stringify(accounts));
+    window.dispatchEvent(
+      new CustomEvent('savatchi_account_registered', {
+        detail: normalized
+      })
+    );
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        const bc = new BroadcastChannel('savatchi_accounts_sync');
+        bc.postMessage({ type: 'ACCOUNT_REGISTERED', account: normalized });
+        bc.close();
+      } catch (bcErr) {}
+    }
   } catch (e) {}
 
   return normalized;
@@ -500,10 +539,128 @@ export const findAccountByIdentifier = (identifier) => {
   found = accounts.find(a => a.email && a.email.split('@')[0].toLowerCase() === query);
   if (found) return found;
 
+  // 5. To'g'ridan-to'g'ri profil saqlash kalitlaridan qidirish (fallback)
+  try {
+    const rawDirect = localStorage.getItem(`savatchi_profile_${query}`);
+    if (rawDirect) {
+      const parsed = JSON.parse(rawDirect);
+      if (parsed && (parsed.email || parsed.displayName)) {
+        return registerSystemAccount({
+          id: parsed.id || parsed.uid || `usr-${Date.now()}`,
+          uid: parsed.uid || parsed.id || `usr-${Date.now()}`,
+          email: parsed.email || (query.includes('@') ? query : ''),
+          displayName: parsed.displayName || `${parsed.firstName || ''} ${parsed.lastName || ''}`.trim() || query.split('@')[0],
+          firstName: parsed.firstName || '',
+          lastName: parsed.lastName || '',
+          phone: parsed.phone || '',
+          photoURL: parsed.photoURL || null,
+          role: parsed.role || 'Foydalanuvchi'
+        });
+      }
+    }
+  } catch (e) {}
+
   return null;
 };
 
 export const getRegisteredAccountByIdentifier = findAccountByIdentifier;
+
+/**
+ * Foydalanuvchi profilini Supabase 'profiles' jadvaliga sinxronlashtirish.
+ * Multi-device va qurilmalararo profil ma'lumotlarini markazlashtiradi.
+ */
+export const syncProfileToCloud = async (profile) => {
+  if (!profile || !profile.id) return null;
+  try {
+    const email = (profile.email || '').trim().toLowerCase();
+    if (!email) return null;
+
+    const payload = {
+      id: profile.id,
+      email: email,
+      display_name: profile.displayName || `${profile.firstName || ''} ${profile.lastName || ''}`.trim() || email.split('@')[0],
+      first_name: profile.firstName || '',
+      last_name: profile.lastName || '',
+      phone: profile.phone || '',
+      photo_url: profile.photoURL || null,
+      role: profile.role || 'Foydalanuvchi',
+      updated_at: new Date().toISOString()
+    };
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .upsert(payload, { onConflict: 'id' })
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      // Offline yoki jadval hali yaratilmagan (PGRST205)
+      return null;
+    }
+    return data;
+  } catch (e) {
+    return null;
+  }
+};
+
+/**
+ * Qurilmalararo (Multi-Device) Asinxron Qidiruv:
+ * Avval Supabase cloud 'profiles' jadvalidan qidiradi (cross-device/multi-device),
+ * agar topilsa mahalliy keshga saqlaydi va qaytaradi.
+ * Agar Supabase offline bo'lsa yoki jadval hali yaratilmagan bo'lsa (PGRST205),
+ * xatoliksiz darhol mahalliy ro'yxatdan (localStorage) qidirib topadi.
+ */
+export const findAccountByIdentifierAsync = async (identifier) => {
+  if (!identifier || typeof identifier !== 'string') return null;
+  const query = identifier.trim().toLowerCase();
+  if (!query) return null;
+
+  // 1. Mahalliy keshdan tekshirish
+  const localAccount = findAccountByIdentifier(query);
+
+  // 2. Supabase Cloud orqali qidirish (Multi-device va boshqa brauzer/qurilmalar uchun)
+  try {
+    const queryPhoneDigits = normalizePhone(identifier);
+
+    let queryBuilder = supabase.from('profiles').select('*');
+    if (query.includes('@')) {
+      queryBuilder = queryBuilder.ilike('email', query);
+    } else if (queryPhoneDigits.length >= 7) {
+      queryBuilder = queryBuilder.or(`phone.eq.${identifier.trim()},phone.ilike.%${queryPhoneDigits}%`);
+    } else {
+      queryBuilder = queryBuilder.or(`id.eq.${query},email.ilike.${query}%`);
+    }
+
+    const { data, error } = await queryBuilder.maybeSingle();
+
+    if (!error && data) {
+      const cloudAccount = {
+        id: data.id,
+        uid: data.id,
+        displayName: data.display_name || `${data.first_name || ''} ${data.last_name || ''}`.trim() || data.email?.split('@')[0],
+        firstName: data.first_name || '',
+        lastName: data.last_name || '',
+        email: data.email,
+        phone: data.phone || '',
+        photoURL: data.photo_url || null,
+        avatar: (data.display_name || data.first_name || data.email || 'U').charAt(0).toUpperCase(),
+        bg: 'bg-blue-600',
+        role: data.role || 'Foydalanuvchi',
+        emailVerified: data.email_verified || false,
+        createdAt: data.created_at || new Date().toISOString()
+      };
+
+      // Mahalliy tizim ro'yxatiga ham keshlaymiz
+      registerSystemAccount(cloudAccount);
+      return cloudAccount;
+    }
+  } catch (cloudErr) {
+    // Supabase jadvali hali yaratilmagan bo'lsa yoki offline bo'lsa, xatolik chiqarmasdan local keshga o'tamiz
+  }
+
+  // 3. Fallback: Mahalliy ro'yxatdagi mavjud akkaunt
+  return localAccount;
+};
 
 /**
  * Akkaunt joriy do'konda allaqachon xodim bo'lib ishlayotganligini tekshirish (dublikatdan himoya)

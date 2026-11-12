@@ -1,11 +1,14 @@
 import React, { useState } from 'react';
 import { useLanguage } from '../context/LanguageContext';
+import { useToast } from '../context/ToastContext';
 import { PRODUCTS as initialProducts } from '../data/products';
 import { Package, Search, Plus, Trash2, Edit3, X } from 'lucide-react';
 
 export const InventoryPage = () => {
   const { t, tProduct, tCategory, tUnit } = useLanguage();
+  const { showUndoDelete } = useToast();
   const [products, setProducts] = useState(initialProducts);
+  const [pendingDeleteIds, setPendingDeleteIds] = useState(() => new Set());
   const [search, setSearch] = useState('');
   const [isAddOpen, setIsAddOpen] = useState(false);
 
@@ -29,10 +32,38 @@ export const InventoryPage = () => {
   };
 
   const handleDelete = (id) => {
-    setProducts(products.filter(p => p.id !== id));
+    const target = products.find(p => p.id === id);
+    if (!target) return;
+
+    // 1. Vaqtincha interfeysdan yashirish
+    setPendingDeleteIds(prev => new Set(prev).add(id));
+
+    // 2. 5 soniyalik bekor qilish bildirishnomasini ko'rsatish
+    showUndoDelete({
+      title: 'Mahsulot o‘chirilmoqda...',
+      seconds: 5,
+      successMessage: 'Mahsulot muvaffaqiyatli o‘chirildi.',
+      onUndo: () => {
+        setPendingDeleteIds(prev => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      },
+      onCommit: async () => {
+        setProducts(prev => prev.filter(p => p.id !== id));
+        setPendingDeleteIds(prev => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      }
+    });
   };
 
-  const filtered = products.filter(p => p.name.toLowerCase().includes(search.toLowerCase()));
+  const filtered = products
+    .filter(p => !pendingDeleteIds.has(p.id))
+    .filter(p => p.name.toLowerCase().includes(search.toLowerCase()));
 
   return (
     <div className="space-y-6 pb-12 font-sans select-none">

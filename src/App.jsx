@@ -46,11 +46,25 @@ import { ProductModal } from './components/ProductModal';
 
 // ─── Admin Dashboard Layout ───────────────────────────────────────────────────
 function DashboardLayout() {
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState(() => {
+    try {
+      return sessionStorage.getItem('savatchi_active_tab') || 'dashboard';
+    } catch (e) {
+      return 'dashboard';
+    }
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const navigate = useNavigate();
   const { isEmployee, isRentalAllowed, isDebtsAllowed, isInstallmentAllowed } = useStore();
+
+  React.useEffect(() => {
+    try {
+      if (activeTab) {
+        sessionStorage.setItem('savatchi_active_tab', activeTab);
+      }
+    } catch (e) {}
+  }, [activeTab]);
 
   // If an employee tries to access a restricted tab, automatically reset to dashboard
   React.useEffect(() => {
@@ -135,15 +149,78 @@ function StoreFrontLayout() {
         <Route path="/orders" element={<OrdersPage />} />
         <Route path="/wishlist" element={<WishlistPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
-        <Route path="/seller" element={<SellerDashboard />} />
-        <Route path="/seller/sales" element={<SalesPage />} />
-        <Route path="/seller/inventory" element={<InventoryPage />} />
-        <Route path="/seller/staff" element={!isEmployee ? <StaffPage /> : <Navigate to="/store/seller" replace />} />
-        <Route path="/seller/debtors" element={isDebtsAllowed ? <DebtorsPage /> : <Navigate to="/store/seller" replace />} />
-        <Route path="/seller/rentals" element={isRentalAllowed ? <RentalsPage /> : <Navigate to="/store/seller" replace />} />
-        <Route path="/seller/installments" element={isInstallmentAllowed ? <InstallmentsPage /> : <Navigate to="/store/seller" replace />} />
-        <Route path="/seller/reports" element={!isEmployee ? <ReportsPage /> : <Navigate to="/store/seller" replace />} />
-        <Route path="/seller/history" element={!isEmployee ? <ActivityHistoryPage /> : <Navigate to="/store/seller" replace />} />
+        <Route
+          path="/seller"
+          element={
+            <ProtectedRoute requireStore={true}>
+              <SellerDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/seller/sales"
+          element={
+            <ProtectedRoute requireStore={true}>
+              <SalesPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/seller/inventory"
+          element={
+            <ProtectedRoute requireStore={true}>
+              <InventoryPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/seller/staff"
+          element={
+            <ProtectedRoute requireStore={true}>
+              {!isEmployee ? <StaffPage /> : <Navigate to="/store/seller" replace />}
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/seller/debtors"
+          element={
+            <ProtectedRoute requireStore={true}>
+              {isDebtsAllowed ? <DebtorsPage /> : <Navigate to="/store/seller" replace />}
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/seller/rentals"
+          element={
+            <ProtectedRoute requireStore={true}>
+              {isRentalAllowed ? <RentalsPage /> : <Navigate to="/store/seller" replace />}
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/seller/installments"
+          element={
+            <ProtectedRoute requireStore={true}>
+              {isInstallmentAllowed ? <InstallmentsPage /> : <Navigate to="/store/seller" replace />}
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/seller/reports"
+          element={
+            <ProtectedRoute requireStore={true}>
+              {!isEmployee ? <ReportsPage /> : <Navigate to="/store/seller" replace />}
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/seller/history"
+          element={
+            <ProtectedRoute requireStore={true}>
+              {!isEmployee ? <ActivityHistoryPage /> : <Navigate to="/store/seller" replace />}
+            </ProtectedRoute>
+          }
+        />
         <Route path="*" element={<Navigate to="/store/" replace />} />
       </Routes>
       {/* Global Overlays */}
