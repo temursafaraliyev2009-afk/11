@@ -336,7 +336,38 @@ function fromDBRental(row) {
   };
 }
 
-// 6. INSTALLMENTS
+// 6. EXPENSES
+function toDBExpense(e, storeId) {
+  return {
+    store_id: storeId,
+    id: e.id,
+    name: e.name || '',
+    amount: Number(e.amount) || 0,
+    date: e.date || new Date().toISOString().split('T')[0],
+    payment_type: e.paymentType || 'Naqd',
+    note: e.note || null,
+    created_by_id: safeUUID(e.createdById),
+    created_by_name: e.createdByName || null,
+    updated_at: new Date().toISOString()
+  };
+}
+
+function fromDBExpense(row) {
+  return {
+    id: row.id,
+    storeId: row.store_id,
+    name: row.name,
+    amount: Number(row.amount) || 0,
+    date: row.date,
+    paymentType: row.payment_type || 'Naqd',
+    note: row.note || '',
+    createdById: row.created_by_id,
+    createdByName: row.created_by_name,
+    updatedAt: row.updated_at
+  };
+}
+
+// 7. INSTALLMENTS
 function toDBInstallment(c, storeId) {
   return {
     store_id: storeId,
@@ -824,6 +855,24 @@ export const activities = {
   }
 };
 
+export const expenses = {
+  async upsert(storeId, expense) {
+    await upsertRow('expenses', toDBExpense(expense, storeId));
+  },
+  async delete(storeId, id) {
+    await deleteRow('expenses', storeId, id);
+  },
+  async read(storeId) {
+    const rows = await readRows('expenses', storeId);
+    return rows.map(fromDBExpense);
+  },
+  subscribe(storeId, callback) {
+    return subscribeToTable('expenses', storeId, (event, row) => {
+      callback(event, row ? fromDBExpense(row) : null);
+    });
+  }
+};
+
 // ═══════════════════════════════════════════════════════════════════
 // BULK LOAD (Owner va Employee uchun yagona kirish nuqtasi)
 // ═══════════════════════════════════════════════════════════════════
@@ -836,7 +885,8 @@ export async function loadStoreData(storeId) {
     cloudOrders,
     cloudRentals,
     cloudInstallments,
-    cloudActivities
+    cloudActivities,
+    cloudExpenses
   ] = await Promise.allSettled([
     products.read(storeId),
     sales.read(storeId),
@@ -844,7 +894,8 @@ export async function loadStoreData(storeId) {
     orders.read(storeId),
     rentals.read(storeId),
     installmentContracts.read(storeId),
-    activities.read(storeId)
+    activities.read(storeId),
+    expenses.read(storeId)
   ]);
 
   return {
@@ -855,6 +906,7 @@ export async function loadStoreData(storeId) {
     rentals: cloudRentals.status === 'fulfilled' ? cloudRentals.value : null,
     installments: cloudInstallments.status === 'fulfilled' ? cloudInstallments.value : null,
     activities: cloudActivities.status === 'fulfilled' ? cloudActivities.value : null,
+    expenses: cloudExpenses.status === 'fulfilled' ? cloudExpenses.value : null,
     errors: {
       products: cloudProducts.status === 'rejected' ? cloudProducts.reason?.message : null,
       sales: cloudSales.status === 'rejected' ? cloudSales.reason?.message : null,
@@ -862,7 +914,8 @@ export async function loadStoreData(storeId) {
       orders: cloudOrders.status === 'rejected' ? cloudOrders.reason?.message : null,
       rentals: cloudRentals.status === 'rejected' ? cloudRentals.reason?.message : null,
       installments: cloudInstallments.status === 'rejected' ? cloudInstallments.reason?.message : null,
-      activities: cloudActivities.status === 'rejected' ? cloudActivities.reason?.message : null
+      activities: cloudActivities.status === 'rejected' ? cloudActivities.reason?.message : null,
+      expenses: cloudExpenses.status === 'rejected' ? cloudExpenses.reason?.message : null
     }
   };
 }
@@ -879,7 +932,8 @@ export function subscribeToStoreData(storeId, onUpdate) {
     debts.subscribe(storeId, (ev, row) => onUpdate('debts', ev, row)),
     orders.subscribe(storeId, (ev, row) => onUpdate('orders', ev, row)),
     rentals.subscribe(storeId, (ev, row) => onUpdate('rentals', ev, row)),
-    installmentContracts.subscribe(storeId, (ev, row) => onUpdate('installments', ev, row))
+    installmentContracts.subscribe(storeId, (ev, row) => onUpdate('installments', ev, row)),
+    expenses.subscribe(storeId, (ev, row) => onUpdate('expenses', ev, row))
   ];
 
   return () => cleanups.forEach(fn => { try { fn(); } catch (e) {} });
@@ -897,6 +951,7 @@ export default {
   orders,
   rentals,
   installmentContracts,
+  expenses,
   activities,
   loadStoreData,
   subscribeToStoreData

@@ -21,6 +21,7 @@ import { Employees } from './pages/Employees';
 import { ActivityHistory } from './pages/ActivityHistory';
 import { Rentals } from './pages/Rentals';
 import { Installments } from './pages/Installments';
+import { Expenses } from './pages/Expenses';
 
 // Storefront Pages
 import { HomePage } from './pages/HomePage';
@@ -116,6 +117,7 @@ function DashboardLayout() {
           {activeTab === 'orders' && <Orders />}
           {activeTab === 'staff' && (!isEmployee ? <Employees /> : <Dashboard setActiveTab={setActiveTab} />)}
           {activeTab === 'history' && (!isEmployee ? <ActivityHistory /> : <Dashboard setActiveTab={setActiveTab} />)}
+          {activeTab === 'expenses' && <Expenses />}
         </main>
       </div>
     </div>

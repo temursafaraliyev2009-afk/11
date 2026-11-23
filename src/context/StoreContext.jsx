@@ -120,6 +120,7 @@ const EMPLOYEES_KEY = 'savatchi_employees_';
 const ACTIVITIES_KEY = 'savatchi_activities_';
 const RENTALS_KEY = 'savatchi_rentals_';
 const INSTALLMENTS_KEY = 'savatchi_installments_';
+const EXPENSES_KEY = 'savatchi_expenses_';
 
 // User-scoped storage key generators for complete account data isolation
 export const getUserStoresKey = (userId) => userId ? `savatchi_${userId}_user_stores` : USER_STORES_KEY;
@@ -132,6 +133,7 @@ export const getEmployeesKey = (userId, storeId) => userId ? `savatchi_${userId}
 export const getActivitiesKey = (userId, storeId) => userId ? `savatchi_${userId}_activities_${storeId}` : `${ACTIVITIES_KEY}${storeId}`;
 export const getRentalsKey = (userId, storeId) => userId ? `savatchi_${userId}_rentals_${storeId}` : `${RENTALS_KEY}${storeId}`;
 export const getInstallmentsKey = (userId, storeId) => userId ? `savatchi_${userId}_installments_${storeId}` : `${INSTALLMENTS_KEY}${storeId}`;
+export const getExpensesKey = (userId, storeId) => userId ? `savatchi_${userId}_expenses_${storeId}` : `${EXPENSES_KEY}${storeId}`;
 
 // Storage helpers
 export const loadUserStoresFromStorage = (userId, userEmail = null) => {
@@ -675,6 +677,7 @@ export const StoreProvider = ({ children }) => {
       setActivities([]);
       setRentals([]);
       setInstallments([]);
+      setExpenses([]);
       loadedStoreIdRef.current = null;
       hydratedScopeRef.current = null;
       pendingHydrationRef.current = null;
@@ -807,6 +810,11 @@ export const StoreProvider = ({ children }) => {
     return getScopedStoreData(getInstallmentsKey, INSTALLMENTS_KEY, activeStoreId, currentStore) || [];
   });
 
+  const [expenses, setExpenses] = useState(() => {
+    if (!currentUserId || !activeStoreId) return [];
+    return getScopedStoreData(getExpensesKey, EXPENSES_KEY, activeStoreId, currentStore) || [];
+  });
+
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState('31-avgust 16:42');
   const [searchTargetItem, setSearchTargetItem] = useState(null);
@@ -823,6 +831,7 @@ export const StoreProvider = ({ children }) => {
       setActivities([]);
       setRentals([]);
       setInstallments([]);
+      setExpenses([]);
       loadedStoreIdRef.current = null;
       hydratedScopeRef.current = null;
       pendingHydrationRef.current = null;
@@ -889,6 +898,10 @@ export const StoreProvider = ({ children }) => {
     const initialInstallments = getScopedStoreData(getInstallmentsKey, INSTALLMENTS_KEY, sId, currentStore) || [];
     setInstallments(initialInstallments);
 
+    // 9. Expenses (Qo'shimcha xarajatlar)
+    const initialExpenses = getScopedStoreData(getExpensesKey, EXPENSES_KEY, sId, currentStore) || [];
+    setExpenses(initialExpenses);
+
     // ── SUPABASE CLOUD LOAD (async, localStorage ustidan merge) ──────────────
     // localStorage — tez UI uchun darhol yuklanadi (yuqorida).
     // Supabase — fon rejimida yuklanib, yangi/umumiy ma'lumotlarni qo'shadi.
@@ -922,6 +935,7 @@ export const StoreProvider = ({ children }) => {
         if (Array.isArray(cloud.orders) && cloud.orders.length > 0) setOrders(prev => mergeCloud(prev, cloud.orders));
         if (Array.isArray(cloud.rentals) && cloud.rentals.length > 0) setRentals(prev => mergeCloud(prev, cloud.rentals));
         if (Array.isArray(cloud.installments) && cloud.installments.length > 0) setInstallments(prev => mergeCloud(prev, cloud.installments));
+        if (Array.isArray(cloud.expenses) && cloud.expenses.length > 0) setExpenses(prev => mergeCloud(prev, cloud.expenses));
       }).catch(err => {
         console.warn('[StoreContext] Cloud ma\'lumotlarini yuklashda xato:', err?.message || err);
       });
@@ -1033,6 +1047,15 @@ export const StoreProvider = ({ children }) => {
           setInstallments(prev => {
             const idx = prev.findIndex(c => c.id === row.id);
             return idx >= 0 ? prev.map(c => c.id === row.id ? { ...c, ...row } : c) : [row, ...prev];
+          });
+        }
+      } else if (entity === 'expenses') {
+        if (eventType === 'DELETE') {
+          setExpenses(prev => prev.filter(e => e.id !== row.id));
+        } else {
+          setExpenses(prev => {
+            const idx = prev.findIndex(e => e.id === row.id);
+            return idx >= 0 ? prev.map(e => e.id === row.id ? { ...e, ...row } : e) : [row, ...prev];
           });
         }
       }
@@ -1168,6 +1191,9 @@ export const StoreProvider = ({ children }) => {
           } else if (entity === 'installments') {
             const reloaded = getScopedStoreData(getInstallmentsKey, INSTALLMENTS_KEY, sId, currentStore);
             if (reloaded) setInstallments(reloaded);
+          } else if (entity === 'expenses') {
+            const reloaded = getScopedStoreData(getExpensesKey, EXPENSES_KEY, sId, currentStore);
+            if (reloaded) setExpenses(reloaded);
           }
         }
       };
@@ -1320,6 +1346,21 @@ export const StoreProvider = ({ children }) => {
     localStorage.setItem(INSTALLMENTS_KEY + sId, payload);
     broadcastStoreUpdate('installments', sId);
   }, [installments, currentStore?.id, currentStore?.ownerId, currentUserId]);
+
+  useEffect(() => {
+    const sId = currentStore?.id;
+    const scope = currentUserId && sId ? `${currentUserId}::${sId}` : null;
+    if (!scope || hydratedScopeRef.current !== scope || loadedStoreIdRef.current !== sId) return;
+
+    const ownerId = currentStore?.ownerId || currentUserId;
+    const payload = JSON.stringify(expenses);
+    localStorage.setItem(getExpensesKey(ownerId, sId), payload);
+    if (ownerId !== currentUserId) {
+      localStorage.setItem(getExpensesKey(currentUserId, sId), payload);
+    }
+    localStorage.setItem(EXPENSES_KEY + sId, payload);
+    broadcastStoreUpdate('expenses', sId);
+  }, [expenses, currentStore?.id, currentStore?.ownerId, currentUserId]);
 
   // Switch Active Store
   const switchStore = (storeIdOrType) => {
@@ -1919,6 +1960,83 @@ export const StoreProvider = ({ children }) => {
       }
     }
   };
+  // Expenses (Qo'shimcha xarajatlar) Actions
+  const addExpense = (expenseData) => {
+    const userName = currentUserName || 'Foydalanuvchi';
+    const newExpense = {
+      id: 'exp-' + Date.now(),
+      name: expenseData.name || '',
+      amount: Number(expenseData.amount) || 0,
+      date: expenseData.date || getLocalDateString(),
+      paymentType: expenseData.paymentType || 'Naqd',
+      note: expenseData.note || '',
+      createdById: currentUserId || '',
+      createdByName: userName,
+      storeId: currentStore?.id || activeStoreId || '',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    setExpenses(prev => [newExpense, ...prev]);
+    if (isSupabaseConfigured && newExpense.storeId) {
+      (async () => {
+        try {
+          if (ensureStoreFnRef.current) await ensureStoreFnRef.current();
+          await svcDB.expenses.upsert(newExpense.storeId, newExpense);
+        } catch (err) {
+          console.error('[Supabase expenses.upsert]', err?.message || err);
+          notifySyncEvent('error', { entity: 'expenses', action: 'insert', id: newExpense.id, message: err?.message });
+        }
+      })();
+    }
+    logActivity(userName, `Yangi xarajat kiritildi: ${newExpense.name}`, `${newExpense.amount.toLocaleString()} so'm`, 'Xarajat');
+    return newExpense;
+  };
+
+  const updateExpense = (id, updates) => {
+    const userName = currentUserName || 'Foydalanuvchi';
+    let updatedTarget = null;
+    setExpenses(prev => prev.map(e => {
+      if (e.id === id) {
+        const updated = { ...e, ...updates, updatedAt: new Date().toISOString() };
+        updatedTarget = updated;
+        return updated;
+      }
+      return e;
+    }));
+    if (isSupabaseConfigured && currentStore?.id && updatedTarget) {
+      (async () => {
+        try {
+          if (ensureStoreFnRef.current) await ensureStoreFnRef.current();
+          await svcDB.expenses.upsert(currentStore.id, updatedTarget);
+        } catch (err) {
+          console.error('[Supabase expenses.upsert]', err?.message || err);
+          notifySyncEvent('error', { entity: 'expenses', action: 'update', id, message: err?.message });
+        }
+      })();
+    }
+    logActivity(userName, `Xarajat tahrirlandi`, `${Number(updatedTarget?.amount || 0).toLocaleString()} so'm`, 'Xarajat');
+  };
+
+  const deleteExpense = (id) => {
+    const userName = currentUserName || 'Foydalanuvchi';
+    const e = expenses.find(item => item.id === id);
+    if (e) {
+      logActivity(userName, `Xarajat o'chirildi: ${e.name}`, `${e.amount.toLocaleString()} so'm`, 'Xarajat');
+      setExpenses(prev => prev.filter(item => item.id !== id));
+      if (isSupabaseConfigured && currentStore?.id) {
+        (async () => {
+          try {
+            if (ensureStoreFnRef.current) await ensureStoreFnRef.current();
+            await svcDB.expenses.delete(currentStore.id, id);
+          } catch (err) {
+            console.error('[Supabase expenses.delete]', err?.message || err);
+            notifySyncEvent('error', { entity: 'expenses', action: 'delete', id, message: err?.message });
+          }
+        })();
+      }
+    }
+  };
+
   // Orders Actions
   const addOrder = (orderData, userName) => {
     userName = currentUserName || userName || 'Foydalanuvchi';
@@ -3403,6 +3521,12 @@ export const StoreProvider = ({ children }) => {
         isInstallmentAllowed: isInstallmentSupportedStoreType(currentStore.type || storeConfig.id),
         isInstallmentSupportedStoreType,
         installmentStats: calculateInstallmentStats(installments),
+
+        // Qo'shimcha xarajatlar (Expenses)
+        expenses,
+        addExpense,
+        updateExpense,
+        deleteExpense,
 
         // Role & Permission Flags
         isOwner,

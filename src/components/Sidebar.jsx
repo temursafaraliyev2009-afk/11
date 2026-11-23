@@ -135,13 +135,12 @@ export const Sidebar = ({ activeTab, setActiveTab, isOpen, setIsOpen }) => {
               );
             })}
 
-            {/* Expandable "Boshqalar" Menu (Do'kon egasi va yangi taklif yuboruvchi foydalanuvchilar uchun) */}
-            {!isEmployee && (
+            {/* Expandable "Boshqalar" Menu — Egasi va xodimlar uchun (xodimlar faqat xarajatlarni ko'radi) */}
               <div className="pt-1.5">
                 <button
                   onClick={() => setIsOthersOpen(!isOthersOpen)}
                   className={`w-full flex items-center justify-between px-4 py-3.5 rounded-2xl text-xs font-bold transition-all duration-200 ${
-                    activeTab === 'staff' || activeTab === 'history'
+                    activeTab === 'staff' || activeTab === 'history' || activeTab === 'expenses'
                       ? 'bg-slate-800/80 text-white'
                       : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
                   }`}
@@ -159,32 +158,48 @@ export const Sidebar = ({ activeTab, setActiveTab, isOpen, setIsOpen }) => {
 
                 {isOthersOpen && (
                   <div className="pl-6 pt-2 space-y-1.5">
+                    {/* Xodimlar va Faoliyat tarixi — faqat do'kon egasi */}
+                    {!isEmployee && (
+                      <>
+                        <button
+                          onClick={() => handleNavClick('staff')}
+                          className={`w-full flex items-center space-x-3 px-4 py-2.5 rounded-xl text-xs font-semibold transition-colors ${
+                            activeTab === 'staff'
+                              ? 'bg-blue-600/20 text-blue-400 font-bold'
+                              : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+                          }`}
+                        >
+                          <Users className="w-4 h-4" />
+                          <span>{t('navStaff', 'Xodimlar')}</span>
+                        </button>
+                        <button
+                          onClick={() => handleNavClick('history')}
+                          className={`w-full flex items-center space-x-3 px-4 py-2.5 rounded-xl text-xs font-semibold transition-colors ${
+                            activeTab === 'history'
+                              ? 'bg-blue-600/20 text-blue-400 font-bold'
+                              : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+                          }`}
+                        >
+                          <Clock className="w-4 h-4" />
+                          <span>{t('navHistory', 'Faoliyat tarixi')}</span>
+                        </button>
+                      </>
+                    )}
+                    {/* Qo'shimcha xarajatlar — egasi VA xodimlar ko'ra oladi */}
                     <button
-                      onClick={() => handleNavClick('staff')}
+                      onClick={() => handleNavClick('expenses')}
                       className={`w-full flex items-center space-x-3 px-4 py-2.5 rounded-xl text-xs font-semibold transition-colors ${
-                        activeTab === 'staff'
+                        activeTab === 'expenses'
                           ? 'bg-blue-600/20 text-blue-400 font-bold'
                           : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
                       }`}
                     >
-                      <Users className="w-4 h-4" />
-                      <span>{t('navStaff', 'Xodimlar')}</span>
-                    </button>
-                    <button
-                      onClick={() => handleNavClick('history')}
-                      className={`w-full flex items-center space-x-3 px-4 py-2.5 rounded-xl text-xs font-semibold transition-colors ${
-                        activeTab === 'history'
-                          ? 'bg-blue-600/20 text-blue-400 font-bold'
-                          : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
-                      }`}
-                    >
-                      <Clock className="w-4 h-4" />
-                      <span>{t('navHistory', 'Faoliyat tarixi')}</span>
+                      <Wallet className="w-4 h-4" />
+                      <span>{t('navExpenses', "Qo'shimcha xarajatlar")}</span>
                     </button>
                   </div>
                 )}
               </div>
-            )}
           </nav>
         </div>
       </aside>

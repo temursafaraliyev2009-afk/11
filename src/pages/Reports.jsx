@@ -46,7 +46,8 @@ export const Reports = () => {
     isEmployee,
     isDebtsAllowed,
     isInstallmentAllowed,
-    installments = []
+    installments = [],
+    expenses = []
   } = useStore();
   const { t, tProduct, tCategory, tUnit } = useLanguage();
   const [activeReportTab, setActiveReportTab] = useState('sales'); // 'sales' | 'profit' | 'inventory' | 'debt' | 'installments'
@@ -98,6 +99,28 @@ export const Reports = () => {
 
   const activePeriodData = periodDataMap[timeFilter] || periodDataMap['Bugun'] || periodDataMap['Hafta'];
 
+  // Qo'shimcha xarajatlarni tanlangan davr bo'yicha filtrlash
+  const periodExpenses = useMemo(() => {
+    if (!Array.isArray(expenses) || expenses.length === 0) return 0;
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    const year = todayStr.substring(0, 4);
+    const yearMonth = todayStr.substring(0, 7);
+    return expenses.filter(e => {
+      const d = e.date || '';
+      if (!d) return false;
+      if (timeFilter === 'Bugun') return d === todayStr;
+      if (timeFilter === 'Hafta') {
+        const dayMs = 7 * 24 * 60 * 60 * 1000;
+        const eDate = new Date(d);
+        return eDate >= new Date(now.getTime() - dayMs) && d <= todayStr;
+      }
+      if (timeFilter === 'Oy') return d.startsWith(yearMonth);
+      if (timeFilter === 'Yil') return d.startsWith(year);
+      return false;
+    }).reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+  }, [expenses, timeFilter]);
+
   // Real inventory calculations (separating verified cost from unknown cost)
   const totalStockCount = products.reduce((sum, p) => sum + (Number(p.stock) || 0), 0);
   const totalStockRetailValue = stats.totalInventoryValue ?? products.reduce((sum, p) => sum + ((Number(p.stock) || 0) * (Number(p.price) || 0)), 0);
@@ -116,7 +139,21 @@ export const Reports = () => {
   const baseRevenue = activePeriodData.currentRevenue;
   const realCost = activePeriodData.cost;
   const realProfit = activePeriodData.profit;
+  const adjustedProfit = realProfit - periodExpenses;
+  const isAdjustedLoss = adjustedProfit < 0;
+  const isAdjustedProfit = adjustedProfit > 0;
   const realMarginPct = activePeriodData.profitMargin;
+  // Qo'shimcha xarajatlar hisobga olingan rentabellik foizi
+  const adjustedMarginPct = useMemo(() => {
+    if (baseRevenue <= 0) return '—';
+    const pct = (adjustedProfit / baseRevenue) * 100;
+    if (pct === 0) return '0.0%';
+    const sign = pct < 0 ? '-' : '+';
+    const abs = Math.abs(pct);
+    return abs >= 1000
+      ? `${sign}${Math.round(abs).toLocaleString('uz-UZ')}%`
+      : `${sign}${abs.toFixed(1)}%`;
+  }, [adjustedProfit, baseRevenue]);
   const isOverallLoss = activePeriodData.isLoss;
   const isOverallZero = activePeriodData.isZero ?? (realProfit === 0);
   const isOverallProfit = activePeriodData.isProfit ?? (realProfit > 0);
@@ -434,6 +471,25 @@ export const Reports = () => {
             </div>
 
             {/* Card 3: Rentabellik */}
+            {/* Qo'shimcha xarajatlar KPI card */}
+            {periodExpenses > 0 && (
+              <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs hover:shadow-md hover:border-orange-200 transition-all flex items-center justify-between group">
+                <div className="space-y-1">
+                  <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 block">
+                    Qo'shimcha xarajatlar
+                  </span>
+                  <div className="text-2xl sm:text-[26px] font-black tracking-tight text-orange-600">
+                    -{periodExpenses.toLocaleString()} <span className="text-sm font-bold text-orange-500">{t('sum', "so'm")}</span>
+                  </div>
+                  <div className="text-[11px] font-bold text-slate-400 mt-1">
+                    {timeFilter} davridagi umumiy xarajatlar
+                  </div>
+                </div>
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-orange-500 to-red-500 text-white flex items-center justify-center shadow-lg shadow-orange-500/25 shrink-0 group-hover:scale-105 transition-transform">
+                  <Layers className="w-6 h-6 stroke-[2.2]" />
+                </div>
+              </div>
+            )}
             <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs hover:shadow-md hover:border-purple-200 transition-all flex items-center justify-between group">
               <div className="space-y-1">
                 <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 block">
@@ -615,40 +671,40 @@ export const Reports = () => {
             </div>
 
             <div className={`bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs hover:shadow-md transition-all flex items-center justify-between group ${
-              isOverallLoss ? 'hover:border-rose-200' : isOverallProfit ? 'hover:border-emerald-200' : 'hover:border-slate-300'
+              isAdjustedLoss ? 'hover:border-rose-200' : isAdjustedProfit ? 'hover:border-emerald-200' : 'hover:border-slate-300'
             }`}>
               <div className="space-y-1">
                 <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 block">
-                  {isOverallLoss ? 'Yalpi zarar' : isOverallProfit ? 'Yalpi foyda' : 'Yalpi natija'}
+                  {isAdjustedLoss ? 'Yalpi zarar' : isAdjustedProfit ? 'Yalpi foyda' : 'Yalpi natija'}
                 </span>
                 <div className={`text-2xl sm:text-[26px] font-black tracking-tight ${
-                  isOverallLoss ? 'text-rose-600' : isOverallProfit ? 'text-emerald-600' : 'text-slate-700'
+                  isAdjustedLoss ? 'text-rose-600' : isAdjustedProfit ? 'text-emerald-600' : 'text-slate-700'
                 }`}>
-                  {isOverallLoss
-                    ? `-${Math.abs(realProfit).toLocaleString()}`
-                    : isOverallProfit
-                    ? `+${realProfit.toLocaleString()}`
+                  {isAdjustedLoss
+                    ? `-${Math.abs(adjustedProfit).toLocaleString()}`
+                    : isAdjustedProfit
+                    ? `+${adjustedProfit.toLocaleString()}`
                     : '0'}{' '}
                   <span className={`text-sm font-bold ${
-                    isOverallLoss ? 'text-rose-500' : isOverallProfit ? 'text-emerald-600/70' : 'text-slate-400'
+                    isAdjustedLoss ? 'text-rose-500' : isAdjustedProfit ? 'text-emerald-600/70' : 'text-slate-400'
                   }`}>{t('sum', 'so‘m')}</span>
                 </div>
                 <div className={`text-[11px] font-bold flex items-center gap-1 mt-1 ${
-                  isOverallLoss ? 'text-rose-600' : isOverallProfit ? 'text-emerald-600' : 'text-slate-500'
+                  isAdjustedLoss ? 'text-rose-600' : isAdjustedProfit ? 'text-emerald-600' : 'text-slate-500'
                 }`}>
                   <span>
-                    {isOverallLoss
-                      ? 'Zararli davr natijasi'
-                      : isOverallProfit
-                      ? 'Foydali davr natijasi'
+                    {periodExpenses > 0
+                      ? `Qo'sh. xarajat (-${periodExpenses.toLocaleString()} so'm) ayirilgan`
+                      : isAdjustedLoss ? 'Zararli davr natijasi'
+                      : isAdjustedProfit ? 'Foydali davr natijasi'
                       : 'Nol natija (daromad va xarajat teng)'}
                   </span>
                 </div>
               </div>
               <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${
-                isOverallLoss
+                isAdjustedLoss
                   ? 'from-rose-500 to-red-600 shadow-rose-500/25'
-                  : isOverallProfit
+                  : isAdjustedProfit
                   ? 'from-emerald-500 to-teal-600 shadow-emerald-500/25'
                   : 'from-slate-500 to-slate-600 shadow-slate-500/25'
               } text-white flex items-center justify-center shadow-lg shrink-0 group-hover:scale-105 transition-transform`}>
@@ -662,12 +718,12 @@ export const Reports = () => {
                   {t('profitabilityRate', 'Rentabellik Ko‘rsatkichi')}
                 </span>
                 <div className={`text-2xl sm:text-[26px] font-black tracking-tight ${
-                  isOverallLoss ? 'text-rose-600' : isOverallProfit ? 'text-purple-600' : 'text-slate-700'
+                  isAdjustedLoss ? 'text-rose-600' : isAdjustedProfit ? 'text-purple-600' : 'text-slate-700'
                 }`}>
-                  {realMarginPct}
+                  {adjustedMarginPct}
                 </div>
                 <div className="text-[11px] font-bold text-slate-400 mt-1">
-                  Yalpi rentabellik foizi
+                  {periodExpenses > 0 ? "Xarajatlar hisobga olingan rentabellik" : "Yalpi rentabellik foizi"}
                 </div>
               </div>
               <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-purple-600 to-indigo-600 text-white flex items-center justify-center shadow-lg shadow-purple-600/25 shrink-0 group-hover:scale-105 transition-transform">
