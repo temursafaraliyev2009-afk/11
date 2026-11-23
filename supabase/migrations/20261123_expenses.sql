@@ -50,7 +50,32 @@ DROP POLICY IF EXISTS "expenses_delete_store_members" ON public.expenses;
 CREATE POLICY "expenses_delete_store_members" ON public.expenses
   FOR DELETE USING (public.is_store_member(store_id));
 
--- Enable Realtime
-ALTER PUBLICATION supabase_realtime ADD TABLE public.expenses;
+-- ───────────────────────────────────────────────────────────────────────
+-- TRIGGER: updated_at avtomatik yangilash (mavjud funksiyadan foydalanish)
+-- ───────────────────────────────────────────────────────────────────────
+
+DROP TRIGGER IF EXISTS trg_expenses_updated_at ON public.expenses;
+CREATE TRIGGER trg_expenses_updated_at
+  BEFORE UPDATE ON public.expenses
+  FOR EACH ROW
+  EXECUTE FUNCTION public.set_current_timestamp_updated_at();
+
+-- ───────────────────────────────────────────────────────────────────────
+-- GRANT: authenticated roliga CRUD huquqlari
+-- ───────────────────────────────────────────────────────────────────────
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.expenses TO authenticated;
+
+-- ───────────────────────────────────────────────────────────────────────
+-- REALTIME: Idempotent publication (qayta bajarishda xato bermaydi)
+-- ───────────────────────────────────────────────────────────────────────
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.expenses;
+  END IF;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 COMMENT ON TABLE public.expenses IS 'Savatchi do''konlarining qo''shimcha xarajatlari (ijara, maosh, elektr, suv va boshqalar)';
